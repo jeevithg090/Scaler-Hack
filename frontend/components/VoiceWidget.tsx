@@ -29,6 +29,7 @@ export function VoiceWidget({
         The elevenlabs-convai element expects agent-id. 
         We pass analysis_id via dynamic variables so the custom LLM knows the context.
       */}
+      {/* @ts-ignore */}
       <elevenlabs-convai
         ref={widgetRef}
         agent-id={agentId}
@@ -43,18 +44,3 @@ export function VoiceWidget({
   );
 }
 
-// Ensure TypeScript knows about the custom element
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      "elevenlabs-convai": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & {
-          "agent-id": string;
-          "action-text"?: string;
-          "dynamic-variables"?: string;
-        },
-        HTMLElement
-      >;
-    }
-  }
-}
