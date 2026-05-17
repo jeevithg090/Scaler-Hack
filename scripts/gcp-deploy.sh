@@ -79,6 +79,11 @@ echo "   (This takes 3-5 minutes for the first deploy)"
 
 cd ~/Scaler-Hack/backend
 
+if [ -f .env ]; then
+  echo "   ✓ Loading variables from backend/.env"
+  export $(grep -v '^#' .env | xargs)
+fi
+
 gcloud run deploy ${BACKEND_SERVICE} \
   --source . \
   --region ${REGION} \
@@ -87,7 +92,7 @@ gcloud run deploy ${BACKEND_SERVICE} \
   --max-instances 10 \
   --memory 2Gi \
   --timeout 300 \
-  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET_NAME=${BUCKET_NAME},ENVIRONMENT=production" \
+  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET_NAME=${BUCKET_NAME},ENVIRONMENT=production,GEMINI_API_KEY=${GEMINI_API_KEY},ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY},TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID},TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN},TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER}" \
   --quiet
 
 BACKEND_URL=$(gcloud run services describe ${BACKEND_SERVICE} --region=${REGION} --format='value(status.url)')
@@ -101,10 +106,15 @@ echo "   (This takes 3-5 minutes)"
 
 cd ~/Scaler-Hack/frontend
 
-# Write the backend URL and ElevenLabs Agent ID into the env for the build
+# Write the backend URL into the env for the build
 echo "NEXT_PUBLIC_API_URL=${BACKEND_URL}" > .env
-echo "NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_2801krtmjevwf1svvwq4p1yfzbgs" >> .env
-
+if [ -f .env.local ]; then
+  echo "   ✓ Loading variables from frontend/.env.local"
+  export $(grep -v '^#' .env.local | xargs)
+elif [ -f .env ]; then
+  echo "   ✓ Loading variables from frontend/.env"
+  export $(grep -v '^#' .env | xargs)
+fi
 
 gcloud run deploy ${FRONTEND_SERVICE} \
   --source . \
@@ -114,7 +124,7 @@ gcloud run deploy ${FRONTEND_SERVICE} \
   --max-instances 5 \
   --memory 1Gi \
   --timeout 60 \
-  --set-env-vars "NEXT_PUBLIC_API_URL=${BACKEND_URL},NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_2801krtmjevwf1svvwq4p1yfzbgs" \
+  --set-env-vars "NEXT_PUBLIC_API_URL=${BACKEND_URL},NEXT_PUBLIC_ELEVENLABS_AGENT_ID=${NEXT_PUBLIC_ELEVENLABS_AGENT_ID}" \
   --quiet
 
 
