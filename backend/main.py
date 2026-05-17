@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from config import GEMINI_MODEL, MAX_UPLOAD_BYTES
 from models.schemas import AnalyzeResponse, HealthResponse
@@ -115,6 +116,46 @@ async def stream_analysis(analysis_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Follow-up chat ────────────────────────────────────────────────
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/analyze/{analysis_id}/chat")
+async def chat(analysis_id: str, body: ChatRequest):
+    from agents import chat as chat_agent
+
+    data = analysis_store.get_analysis(analysis_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if data.get("status") != "complete":
+        raise HTTPException(status_code=400, detail="Analysis not yet complete")
+
+    clauses_summary = [
+        {
+            "clause_id": c.get("clause_id"),
+            "clause_type": c.get("clause_type"),
+            "verdict": c.get("verdict"),
+            "severity": c.get("severity"),
+            "plain_english": c.get("plain_english"),
+            "negotiation_script": c.get("negotiation_script"),
+        }
+        for c in data.get("clauses", [])
+    ]
+
+    reply = await chat_agent.run(
+        message=body.message,
+        doc_type=data.get("doc_type", "other"),
+        weaker_party=data.get("weaker_party", "unknown"),
+        lexscore=data.get("lexscore", 0),
+        clause_analysis=clauses_summary,
+        critical_issues=data.get("summary", {}).get("critical_issues", []),
+        missing_protections=data.get("missing_protections", []),
+    )
+
+    return {"reply": reply}
 
 
 if __name__ == "__main__":

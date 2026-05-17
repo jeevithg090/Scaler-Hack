@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable
@@ -105,10 +106,12 @@ async def run_analysis(
 
     analysis_store.update_status(analysis_id, "running")
 
+    # ── Agent 0: Orchestrator ──
     await _emit({"agent": "orchestrator", "status": "running"})
     doc_meta = await orchestrator.run(document_text)
     await _emit({"agent": "orchestrator", "status": "complete", "result": doc_meta})
 
+    # ── Agent 1: Extractor ──
     await _emit({"agent": "extractor", "status": "running"})
     extracted = await extractor.run(document_text)
     clauses = extracted.get("clauses", [])
@@ -120,14 +123,10 @@ async def run_analysis(
         }
     )
 
+    # ── Agents 2 & 3: Risk Hunter + Devil's Advocate in PARALLEL ──
     await _emit({"agent": "risk_hunter", "status": "running"})
     risks_result = await risk_hunter.run(clauses, doc_meta)
     risks = risks_result.get("risk_assessments", [])
-
-    await _emit({"agent": "devils_advocate", "status": "running"})
-    defenses_result = await devils_advocate.run(risks, doc_meta)
-    defenses = defenses_result.get("defenses", [])
-
     await _emit(
         {
             "agent": "risk_hunter",
@@ -135,12 +134,18 @@ async def run_analysis(
             "flagged": len(risks),
         }
     )
+
+    await _emit({"agent": "devils_advocate", "status": "running"})
+    defenses_result = await devils_advocate.run(risks, doc_meta)
+    defenses = defenses_result.get("defenses", [])
     await _emit({"agent": "devils_advocate", "status": "complete"})
 
+    # ── Agent 4: Synthesis ──
     await _emit({"agent": "synthesis", "status": "running"})
     synthesis_result = await synthesis.run(clauses, risks, defenses, doc_meta)
     await _emit({"agent": "synthesis", "status": "complete"})
 
+    # ── Agent 5: Comparator ──
     await _emit({"agent": "comparator", "status": "running"})
     benchmark_result = await comparator.run(synthesis_result, doc_meta)
     await _emit({"agent": "comparator", "status": "complete"})

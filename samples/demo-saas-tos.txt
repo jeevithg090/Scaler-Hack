@@ -1,0 +1,23 @@
+TERMS OF SERVICE — CloudSync Pro Platform
+
+Effective Date: January 1, 2025
+
+1. Data Sharing. We may collect, store, and share your personal data, usage analytics, and uploaded content with third-party advertising and marketing partners without additional notice.
+
+2. Account Termination. CloudSync reserves the right to terminate, suspend, or restrict your account at any time, for any reason, without prior notice, refund, or obligation to preserve your data.
+
+3. Content License. By uploading content to CloudSync, you grant CloudSync a perpetual, irrevocable, worldwide, royalty-free, sublicensable license to use, modify, reproduce, distribute, and display your content for any purpose.
+
+4. Liability Limitation. CloudSync's total liability for any claims arising from your use of the service shall not exceed $10, regardless of the nature of the claim. CloudSync is not liable for any data loss, service interruptions, or consequential damages.
+
+5. Governing Law. This agreement shall be governed by and construed in accordance with the laws of the British Virgin Islands. Any disputes shall be resolved exclusively through binding arbitration conducted in Singapore.
+
+6. Automatic Renewal. Your subscription will automatically renew at the then-current rate. You must cancel at least 60 days before the renewal date. No refunds will be issued for partial billing periods.
+
+7. Unilateral Modification. CloudSync reserves the right to modify these Terms at any time. Continued use of the service after changes constitutes acceptance of the modified Terms. No individual notice will be provided.
+
+8. Indemnification. You agree to indemnify, defend, and hold harmless CloudSync, its officers, directors, employees, and agents from any and all claims, damages, and expenses (including attorneys' fees) arising from your use of the service or violation of these Terms.
+
+9. Privacy Waiver. By using the service, you waive any privacy-related claims against CloudSync regarding the collection, storage, processing, or sharing of your data, including data shared with governmental authorities upon request without warrant.
+
+10. Force Majeure. CloudSync shall not be liable for failure to perform due to any cause beyond its reasonable control, including but not limited to natural disasters, war, pandemic, labor disputes, governmental actions, or any technical failure.
