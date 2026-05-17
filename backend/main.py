@@ -158,6 +158,121 @@ async def chat(analysis_id: str, body: ChatRequest):
     return {"reply": reply}
 
 
+# ── ElevenLabs Voice Features ─────────────────────────────────────
+from fastapi import Response
+from services import elevenlabs_client
+
+@app.post("/api/analyze/{analysis_id}/voice/briefing")
+async def voice_briefing(analysis_id: str):
+    data = analysis_store.get_analysis(analysis_id)
+    if not data or data.get("status") != "complete":
+        raise HTTPException(status_code=400, detail="Analysis not complete or not found")
+        
+    lexscore = data.get("lexscore", 0)
+    top_issue = data.get("summary", {}).get("critical_issues", ["Unknown issue"])[0] if data.get("summary", {}).get("critical_issues") else "no major issues"
+    
+    script = f"Here is your contract briefing. The LEXSCORE is {lexscore} out of 100. The most critical issue is {top_issue}. Please review the red clauses carefully."
+    
+    audio = await elevenlabs_client.generate_audio_briefing(script)
+    return Response(content=audio, media_type="audio/mpeg")
+
+@app.post("/api/analyze/{analysis_id}/voice/debate/{clause_id}")
+async def voice_debate(analysis_id: str, clause_id: str):
+    data = analysis_store.get_analysis(analysis_id)
+    if not data or data.get("status") != "complete":
+        raise HTTPException(status_code=400, detail="Analysis not ready")
+        
+    clause = next((c for c in data.get("clauses", []) if c.get("clause_id") == clause_id), None)
+    if not clause:
+        raise HTTPException(status_code=404, detail="Clause not found")
+        
+    # We create a fake debate from the plain english / negotiation script if we don't have separate agent logs stored.
+    # We can ask Gemini to synthesize a debate quickly or just use the data we have.
+    # To keep latency low, we just use the clause data.
+    rh_text = clause.get("plain_english", "This clause is risky.")
+    da_text = "It's standard practice. " + clause.get("negotiation_script", "We can just ask them to remove it.")
+    
+    audio = await elevenlabs_client.generate_agent_debate(rh_text, da_text)
+    return Response(content=audio, media_type="audio/mpeg")
+
+@app.post("/api/analyze/{analysis_id}/voice/negotiate/{clause_id}")
+async def voice_negotiate(analysis_id: str, clause_id: str):
+    data = analysis_store.get_analysis(analysis_id)
+    if not data or data.get("status") != "complete":
+        raise HTTPException(status_code=400, detail="Analysis not ready")
+        
+    clause = next((c for c in data.get("clauses", []) if c.get("clause_id") == clause_id), None)
+    if not clause:
+        raise HTTPException(status_code=404, detail="Clause not found")
+        
+    script = clause.get("negotiation_script", "I cannot agree to this clause.")
+    audio = await elevenlabs_client.generate_negotiation_coach(script)
+    return Response(content=audio, media_type="audio/mpeg")
+
+# ── Custom LLM Endpoint for ElevenAgents ─────────────────────────
+import time
+class OpenAIMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatCompletionRequest(BaseModel):
+    messages: list[OpenAIMessage]
+    model: str
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    elevenlabs_extra_body: Optional[dict] = None
+
+@app.post("/v1/chat/completions")
+async def custom_llm_completion(request: ChatCompletionRequest):
+    # ElevenLabs passes custom variables in extra_body. We expect UUID (analysis_id)
+    extra = request.elevenlabs_extra_body or {}
+    analysis_id = extra.get("UUID")
+    
+    system_prompt = "You are LEXGUARD, an AI contract intelligence system."
+    if analysis_id:
+        data = analysis_store.get_analysis(analysis_id)
+        if data and data.get("status") == "complete":
+            lexscore = data.get("lexscore", 0)
+            critical = json.dumps(data.get("summary", {}).get("critical_issues", []))
+            system_prompt += f" You have analyzed their document. LEXSCORE: {lexscore}. Critical issues: {critical}. Keep answers short."
+    
+    # We extract the last user message, or we can format the whole conversation for Gemini
+    conversation = "\n".join([f"{m.role}: {m.content}" for m in request.messages])
+    prompt = f"Conversation history:\n{conversation}\n\nRespond to the last message concisely."
+    
+    from services.gemini_client import generate_stream
+    stream = generate_stream(prompt, system=system_prompt, temperature=request.temperature or 0.5)
+    
+    async def event_stream():
+        chunk_id = f"chatcmpl-{int(time.time())}"
+        try:
+            # Yield an initial buffer chunk for ElevenLabs to maintain prosody if there's a delay
+            initial_chunk = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": request.model,
+                "choices": [{"delta": {"content": "Let me check that for you... "}, "index": 0, "finish_reason": None}]
+            }
+            yield f"data: {json.dumps(initial_chunk)}\n\n"
+            
+            async for text_chunk in stream:
+                oai_chunk = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": request.model,
+                    "choices": [{"delta": {"content": text_chunk}, "index": 0, "finish_reason": None}]
+                }
+                yield f"data: {json.dumps(oai_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 if __name__ == "__main__":
     import uvicorn
 

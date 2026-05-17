@@ -101,8 +101,10 @@ echo "   (This takes 3-5 minutes)"
 
 cd ~/Scaler-Hack/frontend
 
-# Write the backend URL into the env for the build
+# Write the backend URL and ElevenLabs Agent ID into the env for the build
 echo "NEXT_PUBLIC_API_URL=${BACKEND_URL}" > .env
+echo "NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_2801krtmjevwf1svvwq4p1yfzbgs" >> .env
+
 
 gcloud run deploy ${FRONTEND_SERVICE} \
   --source . \
@@ -112,8 +114,9 @@ gcloud run deploy ${FRONTEND_SERVICE} \
   --max-instances 5 \
   --memory 1Gi \
   --timeout 60 \
-  --set-env-vars "NEXT_PUBLIC_API_URL=${BACKEND_URL}" \
+  --set-env-vars "NEXT_PUBLIC_API_URL=${BACKEND_URL},NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_2801krtmjevwf1svvwq4p1yfzbgs" \
   --quiet
+
 
 FRONTEND_URL=$(gcloud run services describe ${FRONTEND_SERVICE} --region=${REGION} --format='value(status.url)')
 echo ""

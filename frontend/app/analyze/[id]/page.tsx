@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { AgentThinking } from "@/components/AgentThinking";
 import { ClauseCard } from "@/components/ClauseCard";
 import { LexScore } from "@/components/LexScore";
+import { AudioPlayer } from "@/components/AudioPlayer";
+import { VoiceWidget } from "@/components/VoiceWidget";
 import { getAnalysis, streamAnalysis, sendChatMessage } from "@/lib/api";
 import type { LexGuardAnalysis, StreamEvent } from "@/lib/types";
 
@@ -172,11 +174,16 @@ export default function AnalyzePage() {
               <div className="space-y-4">
                 {/* Summary card */}
                 <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-6">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm font-semibold text-slate-200">
                       Document Summary
                     </h2>
                     <div className="flex items-center gap-2">
+                      <AudioPlayer 
+                        endpoint={`/api/analyze/${id}/voice/briefing`} 
+                        buttonText="Play Audio Briefing" 
+                        size="sm"
+                      />
                       <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-slate-400">
                         {result.doc_type?.replace(/_/g, " ")}
                       </span>
@@ -315,7 +322,7 @@ export default function AnalyzePage() {
             {/* Clause cards */}
             <div className="stagger-children space-y-3">
               {filteredClauses.map((c) => (
-                <ClauseCard key={c.clause_id} clause={c} />
+                <ClauseCard key={c.clause_id} clause={c} analysisId={id} />
               ))}
               {filteredClauses.length === 0 && (
                 <p className="py-8 text-center text-sm text-slate-600">
@@ -416,6 +423,9 @@ export default function AnalyzePage() {
           </div>
         </div>
       )}
+      
+      {/* Voice Conversational Agent */}
+      {result && <VoiceWidget agentId={process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || "YOUR_AGENT_ID"} analysisId={id} />}
     </div>
   );
 }

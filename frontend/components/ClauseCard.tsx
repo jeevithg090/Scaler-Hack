@@ -35,7 +35,9 @@ const severityBadge: Record<string, string> = {
   CLEAN: "bg-emerald-900/20 text-lex-green border-lex-green/20",
 };
 
-export function ClauseCard({ clause }: { clause: ClauseAnalysis }) {
+import { AudioPlayer } from "@/components/AudioPlayer";
+
+export function ClauseCard({ clause, analysisId }: { clause: ClauseAnalysis; analysisId: string }) {
   const [expanded, setExpanded] = useState(false);
   const config = verdictConfig[clause.verdict] || verdictConfig.GREEN;
 
@@ -132,17 +134,31 @@ export function ClauseCard({ clause }: { clause: ClauseAnalysis }) {
                 </p>
               </div>
             )}
+            {/* Agent Debate Audio Button */}
+            {(clause.verdict === "RED" || clause.verdict === "AMBER") && (
+              <div className="col-span-1 sm:col-span-2 flex justify-end">
+                <AudioPlayer 
+                  endpoint={`/api/analyze/${analysisId}/voice/debate/${clause.clause_id}`} 
+                  buttonText="Listen to Agent Debate" 
+                />
+              </div>
+            )}
           </div>
 
           {/* Negotiation script */}
           {clause.negotiation_script && (
-            <div className="rounded-lg border border-lex-accent/15 bg-lex-accent/5 p-4">
+            <div className="rounded-lg border border-lex-accent/15 bg-lex-accent/5 p-4 relative group">
               <p className="mb-1.5 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-accent">
                 NEGOTIATION SCRIPT
               </p>
-              <p className="text-sm leading-relaxed text-indigo-200 italic">
+              <p className="text-sm leading-relaxed text-indigo-200 italic mb-3">
                 {clause.negotiation_script}
               </p>
+              <AudioPlayer 
+                endpoint={`/api/analyze/${analysisId}/voice/negotiate/${clause.clause_id}`} 
+                buttonText="Hear How to Say It" 
+                size="sm"
+              />
             </div>
           )}
 

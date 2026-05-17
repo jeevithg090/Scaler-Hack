@@ -72,3 +72,39 @@ async def generate_json(
         return _parse_json(raw)
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse JSON from Gemini: {raw[:500]}") from e
+
+from typing import AsyncGenerator
+
+async def generate_stream(
+    prompt: str,
+    *,
+    system: Optional[str] = None,
+    temperature: float = 0.5,
+) -> AsyncGenerator[str, None]:
+    url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={GEMINI_API_KEY}"
+    parts: list[dict[str, str]] = []
+    if system:
+        parts.append({"text": f"[SYSTEM]\n{system}\n[/SYSTEM]"})
+    parts.append({"text": prompt})
+
+    body: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": temperature},
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", url, json=body) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        text_val = chunk.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                        if text_val:
+                            yield text_val
+                    except Exception:
+                        pass
+
