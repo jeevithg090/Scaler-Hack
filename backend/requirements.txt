@@ -8,3 +8,4 @@ PyMuPDF==1.25.1
 python-docx==1.1.2
 google-cloud-firestore==2.19.0
 elevenlabs
+twilio==9.6.2

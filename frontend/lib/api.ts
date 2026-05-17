@@ -4,11 +4,13 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function startAnalysis(
   file?: File,
-  text?: string
+  text?: string,
+  url?: string
 ): Promise<{ analysis_id: string }> {
   const form = new FormData();
   if (file) form.append("file", file);
   if (text) form.append("text", text);
+  if (url) form.append("url", url);
 
   const res = await fetch(`${API}/api/analyze`, {
     method: "POST",
@@ -64,4 +66,18 @@ export async function sendChatMessage(
   }
   const data = await res.json();
   return data.reply;
+}
+
+export async function downloadNegotiationPack(
+  analysisId: string,
+  format: "md" | "txt" = "md"
+): Promise<Blob> {
+  const res = await fetch(
+    `${API}/api/analyze/${analysisId}/negotiation-pack?format=${format}`
+  );
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(err || "Failed to generate negotiation pack");
+  }
+  return res.blob();
 }

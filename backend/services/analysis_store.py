@@ -99,3 +99,34 @@ def update_status(analysis_id: str, status: str) -> None:
     else:
         if analysis_id in _analyses:
             _analyses[analysis_id]["status"] = status
+
+
+def queue_depth() -> dict[str, int]:
+    if USE_FIRESTORE and db:
+        try:
+            queued = len(
+                list(
+                    db.collection("analyses")
+                    .where("status", "==", "queued")
+                    .stream()
+                )
+            )
+            running = len(
+                list(
+                    db.collection("analyses")
+                    .where("status", "==", "running")
+                    .stream()
+                )
+            )
+            return {"queued": queued, "running": running, "total": queued + running}
+        except Exception:
+            return {"queued": 0, "running": 0, "total": 0}
+    queued = 0
+    running = 0
+    for data in _analyses.values():
+        status = data.get("status")
+        if status == "queued":
+            queued += 1
+        elif status == "running":
+            running += 1
+    return {"queued": queued, "running": running, "total": queued + running}

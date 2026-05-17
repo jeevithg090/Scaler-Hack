@@ -1,7 +1,17 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Play, Square, Loader2 } from "lucide-react";
+
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
+  /\/$/,
+  ""
+);
+
+function resolveEndpoint(endpoint: string) {
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  return `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+}
 
 interface AudioPlayerProps {
   endpoint: string;
@@ -19,6 +29,14 @@ export function AudioPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    };
+  }, []);
 
   const togglePlay = async () => {
     if (isPlaying && audioRef.current) {
@@ -31,14 +49,20 @@ export function AudioPlayer({
     if (!audioRef.current) {
       setIsLoading(true);
       try {
-        const res = await fetch(endpoint, {
+        const res = await fetch(resolveEndpoint(endpoint), {
           method: "POST",
         });
-        if (!res.ok) throw new Error("Audio fetch failed");
+        if (!res.ok) {
+          throw new Error(`Audio fetch failed (${res.status})`);
+        }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
+        audioUrlRef.current = url;
         audioRef.current = new Audio(url);
-        audioRef.current.onended = () => setIsPlaying(false);
+        audioRef.current.onended = () => {
+          if (audioRef.current) audioRef.current.currentTime = 0;
+          setIsPlaying(false);
+        };
       } catch (err) {
         console.error("Failed to load audio", err);
         setIsLoading(false);
@@ -48,8 +72,12 @@ export function AudioPlayer({
     }
 
     if (audioRef.current) {
-      audioRef.current.play();
-      setIsPlaying(true);
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.error("Failed to play audio", err);
+      }
     }
   };
 

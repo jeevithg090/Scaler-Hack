@@ -24,7 +24,7 @@ export function VoiceWidget({
   }, []);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div className="fixed bottom-6 left-6 z-50">
       {/* 
         The elevenlabs-convai element expects agent-id. 
         We pass analysis_id via dynamic variables so the custom LLM knows the context.

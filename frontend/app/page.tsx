@@ -53,20 +53,31 @@ const DOC_TYPES = [
 
 export default function HomePage() {
   const router = useRouter();
+  const [inputMode, setInputMode] = useState<"file" | "text" | "url">("file");
   const [text, setText] = useState("");
+  const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compareA, setCompareA] = useState("");
+  const [compareB, setCompareB] = useState("");
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (text.length < 50) return;
+    if (inputMode === "text" && text.length < 50) return;
+    if (inputMode === "url" && !/^https?:\/\//i.test(url.trim())) return;
     setError(null);
     setLoading(true);
     try {
-      const { analysis_id } = await startAnalysis(undefined, text);
+      const { analysis_id } = await startAnalysis(
+        undefined,
+        inputMode === "text" ? text : undefined,
+        inputMode === "url" ? url.trim() : undefined
+      );
       router.push(`/analyze/${analysis_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -98,6 +109,22 @@ export default function HomePage() {
     e.preventDefault();
     setDragActive(true);
   }, []);
+
+  async function handleCompare() {
+    if (compareA.trim().length < 50 || compareB.trim().length < 50) return;
+    setCompareError(null);
+    setCompareLoading(true);
+    try {
+      const [first, second] = await Promise.all([
+        startAnalysis(undefined, compareA.trim()),
+        startAnalysis(undefined, compareB.trim()),
+      ]);
+      router.push(`/analyze/${first.analysis_id}?compare=${second.analysis_id}`);
+    } catch (err) {
+      setCompareError(err instanceof Error ? err.message : "Could not compare offers");
+      setCompareLoading(false);
+    }
+  }
 
   return (
     <div className="min-h-screen">
@@ -193,7 +220,10 @@ export default function HomePage() {
                   onDrop={onDrop}
                   onDragOver={onDragOver}
                   onDragLeave={() => setDragActive(false)}
-                  onClick={() => fileRef.current?.click()}
+                  onClick={() => {
+                    setInputMode("file");
+                    fileRef.current?.click();
+                  }}
                   className={`dropzone cursor-pointer ${dragActive ? "active" : ""}`}
                 >
                   <input
@@ -223,28 +253,79 @@ export default function HomePage() {
                   )}
                 </div>
 
+                <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-800 bg-slate-900/30 p-1">
+                  {[
+                    { id: "file", label: "FILE" },
+                    { id: "text", label: "PASTE" },
+                    { id: "url", label: "URL" },
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setInputMode(mode.id as "file" | "text" | "url")}
+                      className={`rounded-md px-3 py-2 font-mono text-[10px] font-bold tracking-wider transition-all ${
+                        inputMode === mode.id
+                          ? "bg-lex-accent/20 text-lex-accent"
+                          : "text-slate-500 hover:text-slate-300"
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+
                 {/* Divider */}
                 <div className="flex items-center gap-4">
                   <div className="h-px flex-1 bg-slate-800" />
-                  <span className="text-xs font-medium text-slate-600">
-                    OR PASTE TEXT
+                  <span className="text-xs font-medium text-slate-600 uppercase">
+                    {inputMode === "text"
+                      ? "Paste Contract Text"
+                      : inputMode === "url"
+                        ? "Analyze a Policy URL"
+                        : "Or Paste Text / URL"}
                   </span>
                   <div className="h-px flex-1 bg-slate-800" />
                 </div>
 
-                {/* Textarea */}
-                <textarea
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  rows={6}
-                  placeholder="Paste your employment contract, ToS, NDA, or offer letter here…"
-                  className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-4 text-sm text-slate-100 placeholder:text-slate-600 transition-colors focus:border-lex-accent/50 focus:outline-none focus:ring-1 focus:ring-lex-accent/20"
-                />
+                {inputMode === "text" && (
+                  <textarea
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    rows={6}
+                    placeholder="Paste your employment contract, ToS, NDA, or offer letter here…"
+                    className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-4 text-sm text-slate-100 placeholder:text-slate-600 transition-colors focus:border-lex-accent/50 focus:outline-none focus:ring-1 focus:ring-lex-accent/20"
+                  />
+                )}
+
+                {inputMode === "url" && (
+                  <div className="space-y-2">
+                    <input
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      type="url"
+                      placeholder="https://example.com/terms"
+                      className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-4 text-sm text-slate-100 placeholder:text-slate-600 transition-colors focus:border-lex-accent/50 focus:outline-none focus:ring-1 focus:ring-lex-accent/20"
+                    />
+                    <p className="text-xs text-slate-600">
+                      Best for public ToS, privacy policies, and online agreements.
+                    </p>
+                  </div>
+                )}
+
+                {inputMode === "file" && (
+                  <p className="text-center text-xs text-slate-600">
+                    Prefer text or URL? Switch modes above.
+                  </p>
+                )}
 
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading || text.length < 50}
+                  disabled={
+                    loading ||
+                    (inputMode === "text" && text.length < 50) ||
+                    (inputMode === "url" && !/^https?:\/\//i.test(url.trim()))
+                  }
                   className="group relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-lex-accent to-indigo-500 py-4 text-sm font-bold tracking-wide text-white shadow-lg shadow-lex-accent/20 transition-all disabled:opacity-30 disabled:shadow-none hover:shadow-lex-accent/30"
                 >
                   {loading ? (
@@ -253,13 +334,19 @@ export default function HomePage() {
                       Analyzing…
                     </span>
                   ) : (
-                    "Analyze Contract →"
+                    inputMode === "url" ? "Analyze URL →" : "Analyze Contract →"
                   )}
                 </button>
 
-                {text.length > 0 && text.length < 50 && (
+                {inputMode === "text" && text.length > 0 && text.length < 50 && (
                   <p className="text-center text-xs text-slate-600">
                     {50 - text.length} more characters needed
+                  </p>
+                )}
+
+                {inputMode === "url" && url.length > 0 && !/^https?:\/\//i.test(url.trim()) && (
+                  <p className="text-center text-xs text-lex-red">
+                    URL must start with `http://` or `https://`
                   </p>
                 )}
               </form>
@@ -282,6 +369,46 @@ export default function HomePage() {
                 {t}
               </span>
             ))}
+          </div>
+
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-left">
+            <p className="mb-3 font-mono text-[10px] tracking-[2px] text-emerald-300">
+              COMPARE TWO OFFERS (BETA)
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <textarea
+                value={compareA}
+                onChange={(e) => setCompareA(e.target.value)}
+                rows={5}
+                placeholder="Paste offer A text..."
+                className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-3 text-xs text-slate-100 placeholder:text-slate-600 focus:border-lex-accent/50 focus:outline-none"
+              />
+              <textarea
+                value={compareB}
+                onChange={(e) => setCompareB(e.target.value)}
+                rows={5}
+                placeholder="Paste offer B text..."
+                className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-3 text-xs text-slate-100 placeholder:text-slate-600 focus:border-lex-accent/50 focus:outline-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCompare}
+                disabled={
+                  compareLoading ||
+                  compareA.trim().length < 50 ||
+                  compareB.trim().length < 50
+                }
+                className="rounded-lg bg-emerald-500/20 px-4 py-2 text-xs font-bold text-emerald-200 disabled:opacity-40"
+              >
+                {compareLoading ? "Comparing..." : "Compare Offers"}
+              </button>
+              <span className="text-xs text-slate-500">
+                Runs both analyses and opens a score delta view.
+              </span>
+            </div>
+            {compareError && <p className="mt-2 text-xs text-lex-red">{compareError}</p>}
           </div>
         </div>
       </section>

@@ -1,17 +1,21 @@
-"""Runtime configuration — hackathon sprint uses hardcoded Gemini key."""
+import os
 
-GEMINI_API_KEY = "AQ.Ab8RN6LrsTzpK_9Z-vVi1VOqHgQw-OsbSJw8LS_pDC5MBlMajA"
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+"""Runtime configuration."""
 
-ELEVENLABS_API_KEY = "sk_946fd54deb0c6455c80e21807f51a5e59c0a68597a58a8b8"
-TWILIO_ACCOUNT_SID = "ACa256ef730ed27154495a2320d1def387"
-TWILIO_AUTH_TOKEN = "8516d776bd64c47529b69bea1306e49b"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_BASE = os.getenv("GEMINI_BASE", "https://generativelanguage.googleapis.com/v1beta")
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # GCP (optional — enable per GCP_ENABLE.md)
-GCP_PROJECT_ID = ""
-GCS_BUCKET_NAME = ""
-FIRESTORE_COLLECTION = "analyses"
-ENVIRONMENT = "development"
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
+FIRESTORE_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "analyses")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
