@@ -69,16 +69,7 @@ gcloud firestore databases create --location=${REGION} --type=firestore-native 2
 # ── 5. Clone repo ──────────────────────────────────────────
 echo ""
 echo "▶ [5/8] Cloning repository..."
-cd ~
-if [ -d "Scaler-Hack" ]; then
-  echo "   Repo exists, pulling latest..."
-  cd Scaler-Hack
-  git pull
-else
-  git clone ${REPO_URL}
-  cd Scaler-Hack
-fi
-
+cd ~/Scaler-Hack
 echo "   ✓ Repository ready"
 
 # ── 6. Deploy backend to Cloud Run ─────────────────────────
