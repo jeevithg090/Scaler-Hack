@@ -1,7 +1,7 @@
 "use client";
 
+import React, { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useState, useRef, useCallback } from "react";
 import { startAnalysis } from "@/lib/api";
 
 const FEATURES = [

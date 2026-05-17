@@ -1,3 +1,5 @@
+import type { StreamEvent } from "./types";
+
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function startAnalysis(
@@ -21,7 +23,7 @@ export async function startAnalysis(
 
 export function streamAnalysis(
   id: string,
-  onEvent: (event: import("./types").StreamEvent) => void
+  onEvent: (event: StreamEvent) => void
 ): () => void {
   const es = new EventSource(`${API}/api/analyze/${id}/stream`);
 

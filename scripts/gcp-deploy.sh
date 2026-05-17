@@ -111,7 +111,7 @@ echo "   (This takes 3-5 minutes)"
 cd ~/Scaler-Hack/frontend
 
 # Write the backend URL into the env for the build
-echo "NEXT_PUBLIC_API_URL=${BACKEND_URL}" > .env.local
+echo "NEXT_PUBLIC_API_URL=${BACKEND_URL}" > .env
 
 gcloud run deploy ${FRONTEND_SERVICE} \
   --source . \

@@ -1,8 +1,8 @@
 "use client";
 
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { AgentThinking } from "@/components/AgentThinking";
 import { ClauseCard } from "@/components/ClauseCard";
 import { LexScore } from "@/components/LexScore";
