@@ -76,7 +76,7 @@ export default function HomePage() {
       const { analysis_id } = await startAnalysis(
         undefined,
         inputMode === "text" ? text : undefined,
-        inputMode === "url" ? url.trim() : undefined
+        inputMode === "url" ? url.trim() : undefined,
       );
       router.push(`/analyze/${analysis_id}`);
     } catch (err) {
@@ -103,6 +103,7 @@ export default function HomePage() {
     setDragActive(false);
     const file = e.dataTransfer.files?.[0];
     if (file) handleFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleFile only uses stable setters and router
   }, []);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -173,7 +174,7 @@ export default function HomePage() {
           </div>
 
           <h1 className="mb-6 text-5xl font-extrabold leading-[1.1] tracking-tight text-white md:text-6xl lg:text-7xl">
-            Know what you're
+            Know what you&apos;re
             <br />
             <span className="bg-gradient-to-r from-lex-accent via-indigo-400 to-lex-accent bg-clip-text text-transparent animate-gradient">
               signing
@@ -181,15 +182,10 @@ export default function HomePage() {
           </h1>
 
           <p className="mx-auto mb-12 max-w-2xl text-lg text-slate-400 leading-relaxed">
-            Six adversarial AI agents fight over every clause in your contract.
-            They argue both sides. Then give you a{" "}
-            <span className="font-semibold text-white">LEXSCORE</span>,{" "}
-            <span className="font-semibold text-lex-red">risk verdicts</span>,
-            and the exact{" "}
-            <span className="font-semibold text-lex-accent">
-              words to fight back
-            </span>
-            .
+            Six adversarial AI agents fight over every clause in your contract. They argue both
+            sides. Then give you a <span className="font-semibold text-white">LEXSCORE</span>,{" "}
+            <span className="font-semibold text-lex-red">risk verdicts</span>, and the exact{" "}
+            <span className="font-semibold text-lex-accent">words to fight back</span>.
           </p>
 
           {/* Stats */}
@@ -200,19 +196,14 @@ export default function HomePage() {
               ["100%", "Free"],
             ].map(([n, l]) => (
               <div key={l} className="text-center">
-                <div className="font-mono text-2xl font-bold text-lex-accent">
-                  {n}
-                </div>
+                <div className="font-mono text-2xl font-bold text-lex-accent">{n}</div>
                 <div className="mt-1 text-xs text-slate-500">{l}</div>
               </div>
             ))}
           </div>
 
           {/* ── Upload card ──────────────────────────── */}
-          <div
-            id="platform"
-            className="glass mx-auto max-w-2xl rounded-2xl p-1"
-          >
+          <div id="platform" className="glass mx-auto max-w-2xl rounded-2xl p-1">
             <div className="rounded-xl bg-lex-bg/80 p-6">
               <form onSubmit={handleSubmit} className="space-y-5">
                 {/* Drop zone */}
@@ -224,6 +215,16 @@ export default function HomePage() {
                     setInputMode("file");
                     fileRef.current?.click();
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setInputMode("file");
+                      fileRef.current?.click();
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Upload a contract file (PDF, DOCX or TXT)"
                   className={`dropzone cursor-pointer ${dragActive ? "active" : ""}`}
                 >
                   <input
@@ -231,6 +232,8 @@ export default function HomePage() {
                     type="file"
                     accept=".pdf,.docx,.txt"
                     className="hidden"
+                    aria-hidden="true"
+                    tabIndex={-1}
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       if (f) handleFile(f);
@@ -238,17 +241,13 @@ export default function HomePage() {
                   />
                   <div className="mb-3 text-3xl">📄</div>
                   {fileName ? (
-                    <p className="font-mono text-sm text-lex-accent">
-                      {fileName}
-                    </p>
+                    <p className="font-mono text-sm text-lex-accent">{fileName}</p>
                   ) : (
                     <>
                       <p className="text-sm font-medium text-slate-300">
                         Drop a PDF, DOCX, or TXT file here
                       </p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        or click to browse · max 10MB
-                      </p>
+                      <p className="mt-1 text-xs text-slate-600">or click to browse · max 10MB</p>
                     </>
                   )}
                 </div>
@@ -292,6 +291,7 @@ export default function HomePage() {
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     rows={6}
+                    aria-label="Contract text"
                     placeholder="Paste your employment contract, ToS, NDA, or offer letter here…"
                     className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-4 text-sm text-slate-100 placeholder:text-slate-600 transition-colors focus:border-lex-accent/50 focus:outline-none focus:ring-1 focus:ring-lex-accent/20"
                   />
@@ -303,6 +303,7 @@ export default function HomePage() {
                       value={url}
                       onChange={(e) => setUrl(e.target.value)}
                       type="url"
+                      aria-label="Contract URL"
                       placeholder="https://example.com/terms"
                       className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-4 text-sm text-slate-100 placeholder:text-slate-600 transition-colors focus:border-lex-accent/50 focus:outline-none focus:ring-1 focus:ring-lex-accent/20"
                     />
@@ -333,8 +334,10 @@ export default function HomePage() {
                       <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                       Analyzing…
                     </span>
+                  ) : inputMode === "url" ? (
+                    "Analyze URL →"
                   ) : (
-                    inputMode === "url" ? "Analyze URL →" : "Analyze Contract →"
+                    "Analyze Contract →"
                   )}
                 </button>
 
@@ -380,6 +383,7 @@ export default function HomePage() {
                 value={compareA}
                 onChange={(e) => setCompareA(e.target.value)}
                 rows={5}
+                aria-label="Offer A text"
                 placeholder="Paste offer A text..."
                 className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-3 text-xs text-slate-100 placeholder:text-slate-600 focus:border-lex-accent/50 focus:outline-none"
               />
@@ -387,6 +391,7 @@ export default function HomePage() {
                 value={compareB}
                 onChange={(e) => setCompareB(e.target.value)}
                 rows={5}
+                aria-label="Offer B text"
                 placeholder="Paste offer B text..."
                 className="w-full rounded-xl border border-slate-800 bg-lex-card/50 p-3 text-xs text-slate-100 placeholder:text-slate-600 focus:border-lex-accent/50 focus:outline-none"
               />
@@ -396,9 +401,7 @@ export default function HomePage() {
                 type="button"
                 onClick={handleCompare}
                 disabled={
-                  compareLoading ||
-                  compareA.trim().length < 50 ||
-                  compareB.trim().length < 50
+                  compareLoading || compareA.trim().length < 50 || compareB.trim().length < 50
                 }
                 className="rounded-lg bg-emerald-500/20 px-4 py-2 text-xs font-bold text-emerald-200 disabled:opacity-40"
               >
@@ -414,10 +417,7 @@ export default function HomePage() {
       </section>
 
       {/* ── How It Works ────────────────────────────── */}
-      <section
-        id="how-it-works"
-        className="border-t border-slate-800/50 bg-[#08101c] px-6 py-24"
-      >
+      <section id="how-it-works" className="border-t border-slate-800/50 bg-[#08101c] px-6 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="mb-16 text-center">
             <p className="mb-3 font-mono text-[10px] font-bold tracking-[3px] text-lex-accent">
@@ -427,8 +427,8 @@ export default function HomePage() {
               Six agents. Zero blind spots.
             </h2>
             <p className="mt-4 text-slate-500">
-              While every other tool has one AI summarize your contract, we pit
-              agents against each other.
+              While every other tool has one AI summarize your contract, we pit agents against each
+              other.
             </p>
           </div>
 
@@ -449,10 +449,7 @@ export default function HomePage() {
                     <p className="text-sm font-semibold text-slate-200">
                       Agent {i}: {agent.name}
                     </p>
-                    <p
-                      className="font-mono text-[10px]"
-                      style={{ color: agent.color }}
-                    >
+                    <p className="font-mono text-[10px]" style={{ color: agent.color }}>
                       {agent.desc}
                     </p>
                   </div>
@@ -470,9 +467,7 @@ export default function HomePage() {
             <p className="mb-3 font-mono text-[10px] font-bold tracking-[3px] text-lex-accent">
               DETECTION TAXONOMY
             </p>
-            <h2 className="text-3xl font-bold text-white md:text-4xl">
-              What LEXGUARD catches
-            </h2>
+            <h2 className="text-3xl font-bold text-white md:text-4xl">What LEXGUARD catches</h2>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -481,18 +476,11 @@ export default function HomePage() {
                 key={f.title}
                 className="glass rounded-xl p-6 transition-all duration-300 hover:border-slate-600"
               >
-                <div
-                  className="mb-3 text-2xl"
-                  style={{ color: f.color }}
-                >
+                <div className="mb-3 text-2xl" style={{ color: f.color }}>
                   {f.icon}
                 </div>
-                <h3 className="mb-2 text-sm font-semibold text-slate-200">
-                  {f.title}
-                </h3>
-                <p className="text-xs leading-relaxed text-slate-500">
-                  {f.desc}
-                </p>
+                <h3 className="mb-2 text-sm font-semibold text-slate-200">{f.title}</h3>
+                <p className="text-xs leading-relaxed text-slate-500">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -525,10 +513,7 @@ export default function HomePage() {
                   backgroundColor: s.color + "08",
                 }}
               >
-                <div
-                  className="font-mono text-lg font-bold"
-                  style={{ color: s.color }}
-                >
+                <div className="font-mono text-lg font-bold" style={{ color: s.color }}>
                   {s.range}
                 </div>
                 <div
@@ -550,13 +535,12 @@ export default function HomePage() {
             ⚖
           </div>
           <h2 className="mb-4 text-3xl font-bold text-white">
-            Don't sign anything
+            Don&apos;t sign anything
             <br />
             without running it.
           </h2>
           <p className="mb-8 text-slate-500">
-            Upload any PDF, DOCX, or paste text. Full adversarial analysis in
-            under 45 seconds.
+            Upload any PDF, DOCX, or paste text. Full adversarial analysis in under 45 seconds.
           </p>
           <button
             onClick={() =>
@@ -567,16 +551,11 @@ export default function HomePage() {
             Analyze Your Contract Free →
           </button>
           <div className="mt-6 flex flex-wrap justify-center gap-6">
-            {["No account required", "Results in 45s", "Files auto-deleted 24h"].map(
-              (t) => (
-                <span
-                  key={t}
-                  className="flex items-center gap-1.5 font-mono text-xs text-slate-600"
-                >
-                  <span className="text-lex-green">✓</span> {t}
-                </span>
-              )
-            )}
+            {["No account required", "Results in 45s", "Files auto-deleted 24h"].map((t) => (
+              <span key={t} className="flex items-center gap-1.5 font-mono text-xs text-slate-600">
+                <span className="text-lex-green">✓</span> {t}
+              </span>
+            ))}
           </div>
         </div>
       </section>
@@ -587,15 +566,11 @@ export default function HomePage() {
           <span className="font-mono text-xs font-bold tracking-widest text-slate-600">
             LEXGUARD
           </span>
-          <span className="text-xs text-slate-800">
-            — AI Rights & Contract Intelligence
-          </span>
+          <span className="text-xs text-slate-800">— AI Rights & Contract Intelligence</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-lex-green" />
-          <span className="font-mono text-[10px] text-slate-600">
-            All systems operational
-          </span>
+          <span className="font-mono text-[10px] text-slate-600">All systems operational</span>
         </div>
         <span className="font-mono text-[10px] text-slate-800">
           Built with Gemini · GCP · H2S Hackathon 2025

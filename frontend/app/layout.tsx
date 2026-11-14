@@ -1,17 +1,21 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
+
+export const viewport: Viewport = {
+  themeColor: "#0a0f1a",
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata: Metadata = {
   title: "LEXGUARD — AI Contract Intelligence",
   description:
     "Adversarial multi-agent AI that fights for you before you sign. Upload any contract, offer letter, NDA, or ToS and get a battle-tested risk assessment in under 60 seconds.",
-  keywords: [
-    "contract analysis",
-    "AI lawyer",
-    "legal risk",
-    "NDA review",
-    "employment contract",
-  ],
+  keywords: ["contract analysis", "AI lawyer", "legal risk", "NDA review", "employment contract"],
   openGraph: {
     title: "LEXGUARD — AI Contract Intelligence",
     description:
@@ -20,25 +24,9 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="en" className={`dark ${inter.variable} ${mono.variable}`}>
       <body className="min-h-screen">{children}</body>
     </html>
   );

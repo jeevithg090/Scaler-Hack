@@ -8,13 +8,16 @@ import { ClauseCard } from "@/components/ClauseCard";
 import { LexScore } from "@/components/LexScore";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { VoiceWidget } from "@/components/VoiceWidget";
+import { downloadNegotiationPack, getAnalysis, sendChatMessage, streamAnalysis } from "@/lib/api";
 import {
-  downloadNegotiationPack,
-  getAnalysis,
-  sendChatMessage,
-  streamAnalysis,
-} from "@/lib/api";
+  filterAndSortClauses,
+  projectScore,
+  riskyClauses as selectRiskyClauses,
+  scoreLabel,
+} from "@/lib/scoring";
 import type { LexGuardAnalysis, StreamEvent } from "@/lib/types";
+
+const POLL_INTERVAL_MS = 2500;
 
 type Filter = "ALL" | "RED" | "AMBER" | "GREEN";
 
@@ -30,23 +33,6 @@ const formatMessage = (content: string) => {
     }
     return <span key={i}>{part}</span>;
   });
-};
-
-const scoreLabel = (score: number): string => {
-  if (score <= 19) return "HOSTILE";
-  if (score <= 39) return "PREDATORY";
-  if (score <= 59) return "HIGH_RISK";
-  if (score <= 79) return "MODERATE";
-  if (score <= 89) return "GOOD";
-  return "EXCELLENT";
-};
-
-const severityPenalty: Record<string, number> = {
-  CRITICAL: 15,
-  HIGH: 8,
-  MEDIUM: 4,
-  LOW: 1,
-  CLEAN: 0,
 };
 
 export default function AnalyzePage() {
@@ -74,75 +60,111 @@ export default function AnalyzePage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const close = streamAnalysis(id, (ev: StreamEvent) => {
-      if (ev.type === "error") {
-        setError(ev.message || "Analysis failed");
-        return;
-      }
-      if (ev.type === "complete" && ev.data) {
-        setResult(ev.data);
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const applySnapshot = (data: LexGuardAnalysis): boolean => {
+      if (data.status === "complete" && data.lexscore !== undefined) {
+        setResult(data);
         setActive(null);
-        return;
+        return true;
       }
-      if (ev.agent && ev.status === "running") setActive(ev.agent);
-      if (ev.agent && ev.status === "complete") {
-        setCompleted((prev) => new Set(prev).add(ev.agent!));
-        setActive(null);
+      if (data.status === "error") {
+        setError("Analysis failed. Please try again.");
+        return true;
       }
-    });
+      return false;
+    };
+
+    // Fallback when the event stream drops: poll the snapshot endpoint until it settles.
+    const poll = () => {
+      getAnalysis(id)
+        .then((data) => {
+          if (cancelled || applySnapshot(data)) return;
+          pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+        })
+        .catch(() => {
+          if (!cancelled) setError("Analysis not found or the server is unreachable.");
+        });
+    };
+
+    const close = streamAnalysis(
+      id,
+      (ev: StreamEvent) => {
+        if (ev.type === "error") {
+          setError(ev.message || "Analysis failed");
+          return;
+        }
+        if (ev.type === "complete" && ev.data) {
+          setResult(ev.data);
+          setActive(null);
+          return;
+        }
+        if (ev.agent && ev.status === "running") setActive(ev.agent);
+        if (ev.agent && ev.status === "complete") {
+          setCompleted((prev) => new Set(prev).add(ev.agent!));
+          setActive(null);
+        }
+      },
+      () => {
+        if (!cancelled) poll();
+      },
+    );
 
     getAnalysis(id)
       .then((data) => {
-        if (data.status === "complete" && data.lexscore !== undefined) {
-          setResult(data as LexGuardAnalysis);
-        }
+        if (!cancelled) applySnapshot(data);
       })
       .catch(() => {});
 
-    if (compareId) {
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      close();
+    };
+  }, [id]);
+
+  // The comparison analysis runs concurrently, so poll until it finishes.
+  useEffect(() => {
+    if (!compareId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () => {
       getAnalysis(compareId)
         .then((data) => {
+          if (cancelled) return;
           if (data.status === "complete" && data.lexscore !== undefined) {
             setCompareResult(data as LexGuardAnalysis);
+          } else if (data.status !== "error") {
+            timer = setTimeout(poll, POLL_INTERVAL_MS);
           }
         })
         .catch(() => {});
-    }
-
-    return close;
-  }, [id, compareId]);
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [compareId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const riskyClauses = useMemo(
-    () =>
-      (result?.clauses || []).filter((c) => c.verdict === "RED" || c.verdict === "AMBER"),
-    [result]
-  );
+  const riskyClauses = useMemo(() => selectRiskyClauses(result?.clauses || []), [result]);
 
-  const projectedScore = useMemo(() => {
-    if (!result) return 0;
-    let uplift = 0;
-    for (const clause of riskyClauses) {
-      if (simResolved.has(clause.clause_id)) {
-        uplift += severityPenalty[clause.severity] || 0;
-      }
-    }
-    return Math.min(100, result.lexscore + uplift);
-  }, [result, riskyClauses, simResolved]);
+  const projectedScore = useMemo(
+    () => (result ? projectScore(result.lexscore, result.clauses, simResolved) : 0),
+    [result, simResolved],
+  );
 
   const projectedLabel = useMemo(() => scoreLabel(projectedScore), [projectedScore]);
 
-  const filteredClauses = result?.clauses
-    ? [...result.clauses]
-        .filter((c) => filter === "ALL" || c.verdict === filter)
-        .sort((a, b) => {
-          const order = { RED: 0, AMBER: 1, GREEN: 2 };
-          return (order[a.verdict] ?? 3) - (order[b.verdict] ?? 3);
-        })
-    : [];
+  const filteredClauses = useMemo(
+    () => filterAndSortClauses(result?.clauses || [], filter),
+    [result, filter],
+  );
 
   const checklist = useMemo(() => {
     if (!result) return [];
@@ -199,11 +221,12 @@ export default function AnalyzePage() {
     }
   };
 
-  const planTone = result?.action_plan?.recommendation === "WALK_AWAY"
-    ? "border-lex-red/30 bg-red-950/15 text-red-200"
-    : result?.action_plan?.recommendation === "SIGN"
-      ? "border-lex-green/30 bg-emerald-950/15 text-emerald-200"
-      : "border-amber-500/30 bg-amber-950/15 text-amber-200";
+  const planTone =
+    result?.action_plan?.recommendation === "WALK_AWAY"
+      ? "border-lex-red/30 bg-red-950/15 text-red-200"
+      : result?.action_plan?.recommendation === "SIGN"
+        ? "border-lex-green/30 bg-emerald-950/15 text-emerald-200"
+        : "border-amber-500/30 bg-amber-950/15 text-amber-200";
 
   return (
     <div className="min-h-screen">
@@ -212,7 +235,9 @@ export default function AnalyzePage() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-lex-accent to-indigo-400">
             <span className="text-xs font-bold text-white">⚖</span>
           </div>
-          <span className="font-mono text-sm font-bold tracking-[3px] text-slate-200">LEXGUARD</span>
+          <span className="font-mono text-sm font-bold tracking-[3px] text-slate-200">
+            LEXGUARD
+          </span>
         </Link>
         <div className="flex items-center gap-2 md:gap-3">
           {result && (
@@ -243,7 +268,8 @@ export default function AnalyzePage() {
                 <div className="mb-4 animate-float text-4xl">⚖</div>
                 <h2 className="mb-2 text-lg font-semibold text-white">Adversarial Analysis</h2>
                 <p className="text-sm leading-relaxed text-slate-500">
-                  Six AI agents are debating every clause, then producing redlines and negotiation scripts.
+                  Six AI agents are debating every clause, then producing redlines and negotiation
+                  scripts.
                 </p>
               </div>
             </div>
@@ -281,7 +307,10 @@ export default function AnalyzePage() {
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {(result.action_plan?.next_steps || []).map((step, i) => (
-                  <span key={`${i}-${step}`} className="rounded-lg bg-black/20 px-2.5 py-1 text-xs text-white/90">
+                  <span
+                    key={`${i}-${step}`}
+                    className="rounded-lg bg-black/20 px-2.5 py-1 text-xs text-white/90"
+                  >
                     {i + 1}. {step}
                   </span>
                 ))}
@@ -292,15 +321,24 @@ export default function AnalyzePage() {
               <div className="space-y-4">
                 <LexScore score={result.lexscore} label={result.lexscore_label} />
                 <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-4">
-                  <p className="mb-2 font-mono text-[10px] tracking-wider text-slate-500">SCORE SIMULATOR</p>
-                  <p className="text-xs text-slate-500">If negotiation succeeds on selected clauses:</p>
+                  <p className="mb-2 font-mono text-[10px] tracking-wider text-slate-500">
+                    SCORE SIMULATOR
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    If negotiation succeeds on selected clauses:
+                  </p>
                   <div className="mt-2 flex items-end gap-2">
                     <span className="font-mono text-3xl text-lex-green">{projectedScore}</span>
-                    <span className="text-xs text-slate-400">({projectedLabel.replace(/_/g, " ")})</span>
+                    <span className="text-xs text-slate-400">
+                      ({projectedLabel.replace(/_/g, " ")})
+                    </span>
                   </div>
                   <div className="mt-3 space-y-2">
                     {riskyClauses.slice(0, 6).map((clause) => (
-                      <label key={clause.clause_id} className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-900/40 p-2">
+                      <label
+                        key={clause.clause_id}
+                        className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-900/40 p-2"
+                      >
                         <input
                           type="checkbox"
                           checked={simResolved.has(clause.clause_id)}
@@ -328,7 +366,11 @@ export default function AnalyzePage() {
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-sm font-semibold text-slate-200">Document Summary</h2>
                     <div className="flex flex-wrap items-center gap-2">
-                      <AudioPlayer endpoint={`/api/analyze/${id}/voice/briefing`} buttonText="Audio Briefing" size="sm" />
+                      <AudioPlayer
+                        endpoint={`/api/analyze/${id}/voice/briefing`}
+                        buttonText="Audio Briefing"
+                        size="sm"
+                      />
                       <button
                         onClick={copyShareLink}
                         className="rounded border border-slate-700 px-2 py-1 font-mono text-[10px] text-slate-300 hover:border-lex-accent/50"
@@ -359,7 +401,10 @@ export default function AnalyzePage() {
                       { label: "Warning", count: result.summary.amber_clauses, color: "#f59e0b" },
                       { label: "Clear", count: result.summary.green_clauses, color: "#22c55e" },
                     ].map((s) => (
-                      <div key={s.label} className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-center">
+                      <div
+                        key={s.label}
+                        className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-center"
+                      >
                         <p className="font-mono text-xl font-bold" style={{ color: s.color }}>
                           {s.count}
                         </p>
@@ -381,21 +426,37 @@ export default function AnalyzePage() {
                       </div>
                     </div>
                     <div className="rounded-lg border border-indigo-500/20 bg-indigo-950/10 p-3">
-                      <p className="mb-2 font-mono text-[10px] text-indigo-300">WHY ADVERSARIAL &gt; SINGLE AGENT</p>
+                      <p className="mb-2 font-mono text-[10px] text-indigo-300">
+                        WHY ADVERSARIAL &gt; SINGLE AGENT
+                      </p>
                       <div className="space-y-1 text-xs text-indigo-200">
-                        <p>Disagreements surfaced: {result.adversarial_metrics?.disagreements_count ?? 0}</p>
-                        <p>Defenses overturned: {result.adversarial_metrics?.defenses_overturned ?? 0}</p>
-                        <p>Defensible clauses retained: {result.adversarial_metrics?.defensible_clauses ?? 0}</p>
+                        <p>
+                          Disagreements surfaced:{" "}
+                          {result.adversarial_metrics?.disagreements_count ?? 0}
+                        </p>
+                        <p>
+                          Defenses overturned:{" "}
+                          {result.adversarial_metrics?.defenses_overturned ?? 0}
+                        </p>
+                        <p>
+                          Defensible clauses retained:{" "}
+                          {result.adversarial_metrics?.defensible_clauses ?? 0}
+                        </p>
                       </div>
                     </div>
                   </div>
 
                   {result.summary.critical_issues?.length > 0 && (
                     <div className="mt-4 rounded-lg border border-lex-red/15 bg-red-950/10 p-4">
-                      <p className="mb-2 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-red">⚠ TOP CRITICAL ISSUES</p>
+                      <p className="mb-2 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-red">
+                        ⚠ TOP CRITICAL ISSUES
+                      </p>
                       <ul className="space-y-1.5">
                         {result.summary.critical_issues.map((issue: string, i: number) => (
-                          <li key={i} className="flex items-start gap-2 text-xs leading-relaxed text-red-300">
+                          <li
+                            key={i}
+                            className="flex items-start gap-2 text-xs leading-relaxed text-red-300"
+                          >
                             <span className="mt-0.5 text-lex-red">▸</span>
                             {issue}
                           </li>
@@ -408,10 +469,14 @@ export default function AnalyzePage() {
                 {result.document_benchmark?.industry_comparison && (
                   <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-6">
                     <div className="mb-2 flex items-baseline gap-3">
-                      <span className="font-mono text-3xl font-bold text-lex-red">{result.document_benchmark.percentile}th</span>
+                      <span className="font-mono text-3xl font-bold text-lex-red">
+                        {result.document_benchmark.percentile}th
+                      </span>
                       <span className="text-sm text-slate-500">risk percentile</span>
                     </div>
-                    <p className="text-xs leading-relaxed text-slate-400">{result.document_benchmark.industry_comparison}</p>
+                    <p className="text-xs leading-relaxed text-slate-400">
+                      {result.document_benchmark.industry_comparison}
+                    </p>
                     <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
                       <div
                         className="h-full rounded-full transition-all duration-1000"
@@ -426,16 +491,23 @@ export default function AnalyzePage() {
 
                 {result.raw_meta?.orchestrator?.jurisdiction_hints?.length ? (
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-xs text-slate-400">
-                    Jurisdiction hints detected: {result.raw_meta.orchestrator.jurisdiction_hints.join(", ")}. Legal enforceability may vary by region.
+                    Jurisdiction hints detected:{" "}
+                    {result.raw_meta.orchestrator.jurisdiction_hints.join(", ")}. Legal
+                    enforceability may vary by region.
                   </div>
                 ) : null}
 
                 {checklist.length > 0 && (
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-4">
-                    <p className="mb-2 font-mono text-[10px] tracking-wider text-emerald-300">ASK ME BEFORE I SIGN CHECKLIST</p>
+                    <p className="mb-2 font-mono text-[10px] tracking-wider text-emerald-300">
+                      ASK ME BEFORE I SIGN CHECKLIST
+                    </p>
                     <div className="space-y-2">
                       {checklist.map((item) => (
-                        <div key={item.id} className="rounded-md border border-emerald-500/20 bg-black/20 p-2 text-xs text-emerald-100">
+                        <div
+                          key={item.id}
+                          className="rounded-md border border-emerald-500/20 bg-black/20 p-2 text-xs text-emerald-100"
+                        >
                           {item.item}
                         </div>
                       ))}
@@ -447,14 +519,18 @@ export default function AnalyzePage() {
 
             {compareResult && (
               <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-5">
-                <p className="mb-3 font-mono text-[10px] tracking-wider text-slate-400">COMPARE TWO OFFERS (BETA)</p>
+                <p className="mb-3 font-mono text-[10px] tracking-wider text-slate-400">
+                  COMPARE TWO OFFERS (BETA)
+                </p>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-lg border border-slate-800 bg-black/20 p-3">
                     <p className="text-xs text-slate-500">Current Analysis ({id.slice(0, 8)})</p>
                     <p className="font-mono text-2xl text-lex-accent">{result.lexscore}</p>
                   </div>
                   <div className="rounded-lg border border-slate-800 bg-black/20 p-3">
-                    <p className="text-xs text-slate-500">Compared Analysis ({compareId?.slice(0, 8)})</p>
+                    <p className="text-xs text-slate-500">
+                      Compared Analysis ({compareId?.slice(0, 8)})
+                    </p>
                     <p className="font-mono text-2xl text-emerald-300">{compareResult.lexscore}</p>
                   </div>
                 </div>
@@ -467,7 +543,9 @@ export default function AnalyzePage() {
 
             {result.missing_protections?.length > 0 && (
               <div className="rounded-2xl border border-indigo-500/15 bg-indigo-950/10 p-6">
-                <p className="mb-3 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-accent">⬡ MISSING PROTECTIONS</p>
+                <p className="mb-3 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-accent">
+                  ⬡ MISSING PROTECTIONS
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {result.missing_protections.map((p: string, i: number) => (
                     <span
@@ -511,7 +589,9 @@ export default function AnalyzePage() {
                 <ClauseCard key={c.clause_id} clause={c} analysisId={id} />
               ))}
               {filteredClauses.length === 0 && (
-                <p className="py-8 text-center text-sm text-slate-600">No {filter.toLowerCase()} clauses found.</p>
+                <p className="py-8 text-center text-sm text-slate-600">
+                  No {filter.toLowerCase()} clauses found.
+                </p>
               )}
             </div>
           </div>
@@ -524,9 +604,16 @@ export default function AnalyzePage() {
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
               <div>
                 <p className="text-sm font-semibold text-white">Ask about this contract</p>
-                <p className="text-[10px] text-slate-500">LEXSCORE {result.lexscore} · {result.summary.total_clauses} clauses</p>
+                <p className="text-[10px] text-slate-500">
+                  LEXSCORE {result.lexscore} · {result.summary.total_clauses} clauses
+                </p>
               </div>
-              <button onClick={() => setChatOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800">
+              <button
+                type="button"
+                aria-label="Close chat"
+                onClick={() => setChatOpen(false)}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800"
+              >
                 ✕
               </button>
             </div>
@@ -556,7 +643,9 @@ export default function AnalyzePage() {
                 <div
                   key={i}
                   className={`whitespace-pre-wrap rounded-xl px-4 py-3 text-xs leading-relaxed ${
-                    msg.role === "user" ? "ml-8 bg-lex-accent/10 text-indigo-200" : "mr-8 bg-slate-800 text-slate-300"
+                    msg.role === "user"
+                      ? "ml-8 bg-lex-accent/10 text-indigo-200"
+                      : "mr-8 bg-slate-800 text-slate-300"
                   }`}
                 >
                   {formatMessage(msg.content)}
@@ -564,7 +653,8 @@ export default function AnalyzePage() {
               ))}
               {chatLoading && (
                 <div className="mr-8 rounded-xl bg-slate-800 px-4 py-3 text-xs text-slate-500">
-                  <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-600 border-t-slate-400" /> Thinking…
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-600 border-t-slate-400" />{" "}
+                  Thinking…
                 </div>
               )}
               <div ref={chatEndRef} />
@@ -575,6 +665,8 @@ export default function AnalyzePage() {
                 <input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
+                  aria-label="Ask a question about this contract"
+                  maxLength={2000}
                   placeholder="Ask about this contract…"
                   className="flex-1 rounded-lg border border-slate-800 bg-lex-card/50 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-lex-accent/30 focus:outline-none"
                 />
@@ -592,10 +684,7 @@ export default function AnalyzePage() {
       )}
 
       {result && process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID && (
-        <VoiceWidget
-          agentId={process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID}
-          analysisId={id}
-        />
+        <VoiceWidget agentId={process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID} analysisId={id} />
       )}
     </div>
   );
