@@ -13,7 +13,7 @@ const LABELS: Record<string, string> = {
 };
 
 function scoreColor(score: number): string {
-  if (score <= 19) return "#7f1d1d";
+  if (score <= 19) return "#f43f5e";
   if (score <= 39) return "#ef4444";
   if (score <= 59) return "#f97316";
   if (score <= 79) return "#f59e0b";
@@ -67,12 +67,19 @@ export function LexScore({ score, label }: { score: number; label: string }) {
 
   return (
     <div className="flex flex-col items-center rounded-2xl border border-slate-800 bg-lex-card/80 p-8 animate-fade-in-up">
-      <svg viewBox="0 0 200 130" width="220" height="143" className="mb-2">
+      <svg
+        viewBox="0 0 200 130"
+        width="220"
+        height="143"
+        className="mb-2 max-w-full"
+        role="img"
+        aria-label={`LEXSCORE ${score} out of 100: ${displayLabel}`}
+      >
         {/* Track */}
         <path
           d={`M ${arcStart.x} ${arcStart.y} A ${r} ${r} 0 1 1 ${arcFull.x} ${arcFull.y}`}
           fill="none"
-          stroke="#1e293b"
+          stroke="#253247"
           strokeWidth="10"
           strokeLinecap="round"
         />
@@ -117,7 +124,7 @@ export function LexScore({ score, label }: { score: number; label: string }) {
           x={cx}
           y={cy + 32}
           textAnchor="middle"
-          fill="#334155"
+          fill="#94a3b8"
           fontSize="7"
           fontFamily="'JetBrains Mono', monospace"
           letterSpacing="1.5"
@@ -125,7 +132,7 @@ export function LexScore({ score, label }: { score: number; label: string }) {
           LEXSCORE™
         </text>
       </svg>
-      <p className="text-xs text-slate-500 mt-1">out of 100 · higher is safer</p>
+      <p className="text-xs text-slate-400 mt-1">out of 100 · higher is safer</p>
     </div>
   );
 }

@@ -8,7 +8,26 @@ import { ClauseCard } from "@/components/ClauseCard";
 import { LexScore } from "@/components/LexScore";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { VoiceWidget } from "@/components/VoiceWidget";
-import { downloadNegotiationPack, getAnalysis, sendChatMessage, streamAnalysis } from "@/lib/api";
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  Link2,
+  Loader2,
+  MessageSquare,
+  Plus,
+  RotateCcw,
+  Send,
+  X,
+} from "lucide-react";
+import { Logo } from "@/components/Logo";
+import {
+  downloadNegotiationPack,
+  getAnalysis,
+  getHealth,
+  sendChatMessage,
+  streamAnalysis,
+} from "@/lib/api";
 import {
   filterAndSortClauses,
   projectScore,
@@ -49,6 +68,9 @@ export default function AnalyzePage() {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [packLoading, setPackLoading] = useState<"md" | "txt" | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [compareFailed, setCompareFailed] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [simResolved, setSimResolved] = useState<Set<string>>(new Set());
 
   const [chatOpen, setChatOpen] = useState(false);
@@ -58,6 +80,29 @@ export default function AnalyzePage() {
   >([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatToggleRef = useRef<HTMLButtonElement>(null);
+
+  // Only show voice controls when the backend has ElevenLabs configured.
+  useEffect(() => {
+    getHealth()
+      .then((h) => setVoiceEnabled(Boolean(h.environment?.elevenlabs)))
+      .catch(() => setVoiceEnabled(false));
+  }, []);
+
+  // Chat panel: focus the input on open, close on Escape and return focus to the toggle.
+  useEffect(() => {
+    if (!chatOpen) return;
+    chatInputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setChatOpen(false);
+        chatToggleRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chatOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,11 +180,15 @@ export default function AnalyzePage() {
           if (cancelled) return;
           if (data.status === "complete" && data.lexscore !== undefined) {
             setCompareResult(data as LexGuardAnalysis);
-          } else if (data.status !== "error") {
+          } else if (data.status === "error") {
+            setCompareFailed(true);
+          } else {
             timer = setTimeout(poll, POLL_INTERVAL_MS);
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setCompareFailed(true);
+        });
     };
     poll();
     return () => {
@@ -187,7 +236,7 @@ export default function AnalyzePage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not download pack");
+      setNotice(err instanceof Error ? err.message : "Could not download the negotiation pack.");
     } finally {
       setPackLoading(null);
     }
@@ -196,7 +245,12 @@ export default function AnalyzePage() {
   const copyShareLink = async () => {
     const link = typeof window !== "undefined" ? window.location.href : "";
     if (!link) return;
-    await navigator.clipboard.writeText(link);
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      setNotice("Couldn't access the clipboard. Copy the address from your browser bar instead.");
+      return;
+    }
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 1500);
   };
@@ -223,261 +277,356 @@ export default function AnalyzePage() {
 
   const planTone =
     result?.action_plan?.recommendation === "WALK_AWAY"
-      ? "border-lex-red/30 bg-red-950/15 text-red-200"
+      ? "border-lex-red/40 bg-red-950/30 text-red-100"
       : result?.action_plan?.recommendation === "SIGN"
-        ? "border-lex-green/30 bg-emerald-950/15 text-emerald-200"
-        : "border-amber-500/30 bg-amber-950/15 text-amber-200";
+        ? "border-lex-green/40 bg-emerald-950/30 text-emerald-100"
+        : "border-amber-500/40 bg-amber-950/30 text-amber-100";
+
+  const filterCounts: Record<Filter, number> = {
+    ALL: result?.clauses.length ?? 0,
+    RED: result?.summary.red_clauses ?? 0,
+    AMBER: result?.summary.amber_clauses ?? 0,
+    GREEN: result?.summary.green_clauses ?? 0,
+  };
 
   return (
     <div className="min-h-screen">
-      <nav className="glass-strong fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4 md:px-12">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-lex-accent to-indigo-400">
-            <span className="text-xs font-bold text-white">⚖</span>
+      <header className="glass-strong fixed left-0 right-0 top-0 z-50">
+        <div className="mx-auto flex h-16 max-w-content items-center justify-between gap-2 px-4 md:px-6">
+          <Logo />
+          <div className="flex items-center gap-2">
+            {result && (
+              <button
+                ref={chatToggleRef}
+                type="button"
+                onClick={() => setChatOpen(!chatOpen)}
+                aria-expanded={chatOpen}
+                aria-controls="contract-chat"
+                className="btn-secondary btn-sm"
+              >
+                <MessageSquare aria-hidden="true" className="h-4 w-4" />
+                <span className="hidden sm:inline">Ask the contract</span>
+                <span className="sm:hidden">Ask</span>
+              </button>
+            )}
+            <Link href="/" className="btn-primary btn-sm">
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              <span className="hidden sm:inline">New analysis</span>
+              <span className="sm:hidden">New</span>
+            </Link>
           </div>
-          <span className="font-mono text-sm font-bold tracking-[3px] text-slate-200">
-            LEXGUARD
-          </span>
-        </Link>
-        <div className="flex items-center gap-2 md:gap-3">
-          {result && (
-            <button
-              onClick={() => setChatOpen(!chatOpen)}
-              className="rounded-lg border border-slate-700 px-3 py-2 font-mono text-[10px] text-slate-400 transition-all hover:border-lex-accent hover:text-lex-accent md:text-xs"
-            >
-              💬 Ask Contract
-            </button>
-          )}
-          <Link
-            href="/"
-            className="rounded-lg bg-lex-accent/10 px-3 py-2 text-[10px] font-medium text-lex-accent transition-all hover:bg-lex-accent/20 md:text-xs"
-          >
-            + New
-          </Link>
         </div>
-      </nav>
+      </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-24 md:px-6">
+      <main id="main" className="mx-auto max-w-content px-4 pb-24 pt-24 md:px-6">
         {!result && !error && (
-          <div className="mt-8 animate-fade-in-up">
-            <h1 className="mb-2 text-2xl font-bold text-white">Analyzing your contract…</h1>
-            <p className="mb-8 font-mono text-xs text-slate-600">{id}</p>
-            <div className="grid gap-8 md:grid-cols-2">
+          <div className="mt-4 animate-fade-in-up" aria-busy="true">
+            <p className="eyebrow mb-2 text-lex-accent-soft">Analysis in progress</p>
+            <h1 className="mb-2 text-2xl font-bold text-white sm:text-3xl">
+              Analyzing your contract…
+            </h1>
+            <p className="mb-8 text-sm text-slate-400">
+              This usually takes under a minute. You can keep this tab open; results appear
+              automatically.
+            </p>
+            <div className="grid gap-6 md:grid-cols-2">
               <AgentThinking active={active} completed={completed} />
-              <div className="flex flex-col justify-center rounded-2xl border border-slate-800 bg-lex-card/50 p-8">
-                <div className="mb-4 animate-float text-4xl">⚖</div>
-                <h2 className="mb-2 text-lg font-semibold text-white">Adversarial Analysis</h2>
-                <p className="text-sm leading-relaxed text-slate-500">
-                  Six AI agents are debating every clause, then producing redlines and negotiation
-                  scripts.
-                </p>
+              <div aria-hidden="true" className="card space-y-4 p-6">
+                <div className="h-4 w-1/3 animate-pulse rounded bg-slate-800" />
+                <div className="mx-auto my-6 h-32 w-32 animate-pulse rounded-full border-[10px] border-slate-800" />
+                <div className="h-3 w-full animate-pulse rounded bg-slate-800" />
+                <div className="h-3 w-5/6 animate-pulse rounded bg-slate-800" />
+                <div className="h-3 w-2/3 animate-pulse rounded bg-slate-800" />
               </div>
             </div>
+            <p className="mt-6 font-mono text-2xs text-slate-400">Analysis ID: {id}</p>
           </div>
         )}
 
         {error && (
-          <div className="mt-8 animate-fade-in-up rounded-xl border border-lex-red/20 bg-lex-red/5 p-6 text-center">
-            <p className="text-lg font-semibold text-lex-red">Analysis Failed</p>
-            <p className="mt-2 text-sm text-slate-400">{error}</p>
-            <Link
-              href="/"
-              className="mt-4 inline-block rounded-lg bg-lex-accent px-6 py-2 text-sm font-medium text-white"
+          <div
+            role="alert"
+            className="mx-auto mt-8 max-w-lg animate-fade-in-up rounded-2xl border border-lex-red/30 bg-lex-red/10 p-8 text-center"
+          >
+            <span
+              aria-hidden="true"
+              className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-lex-red/15 text-lex-red-soft"
             >
-              Try Again
-            </Link>
+              <AlertTriangle className="h-6 w-6" />
+            </span>
+            <h1 className="text-xl font-semibold text-white">
+              We couldn&apos;t finish this analysis
+            </h1>
+            <p className="mt-2 text-sm text-slate-300">{error}</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Analyses are kept on the server for a limited time, so older links can expire.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="btn-secondary"
+              >
+                <RotateCcw aria-hidden="true" className="h-4 w-4" />
+                Retry
+              </button>
+              <Link href="/" className="btn-primary">
+                Start a new analysis
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {notice && (
+          <div
+            role="alert"
+            className="fixed bottom-4 left-4 right-4 z-[60] mx-auto flex max-w-md items-start gap-3 rounded-xl border border-lex-red/40 bg-lex-card p-4 text-sm text-lex-red-soft shadow-2xl"
+          >
+            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="flex-1">{notice}</span>
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss message"
+              className="-m-2 flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
           </div>
         )}
 
         {result && (
-          <div className="mt-4 space-y-6 animate-fade-in-up">
-            <div className={`rounded-2xl border p-5 ${planTone}`}>
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs tracking-wider">ACTION PLAN</span>
-                <span className="rounded border border-white/20 bg-black/20 px-2 py-0.5 font-mono text-[10px]">
+          <div className="space-y-6 animate-fade-in-up">
+            <div>
+              <p className="eyebrow mb-1 text-lex-accent-soft">Analysis report</p>
+              <h1 className="text-2xl font-bold capitalize text-white sm:text-3xl">
+                {(result.doc_type || "Contract").replace(/_/g, " ")}
+              </h1>
+              {result.weaker_party && (
+                <p className="mt-1 text-sm text-slate-400">
+                  Reviewed from the{" "}
+                  <span className="text-slate-200">{result.weaker_party.replace(/_/g, " ")}</span>
+                  &apos;s point of view
+                </p>
+              )}
+            </div>
+
+            <section aria-labelledby="plan-title" className={`rounded-2xl border p-5 ${planTone}`}>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <h2 id="plan-title" className="eyebrow">
+                  Action plan
+                </h2>
+                <span className="rounded-md border border-white/20 bg-black/25 px-2 py-0.5 font-mono text-2xs font-bold">
                   {result.action_plan?.recommendation?.replace(/_/g, " ")}
                 </span>
-                <span className="rounded border border-white/20 bg-black/20 px-2 py-0.5 font-mono text-[10px]">
+                <span className="rounded-md border border-white/20 bg-black/25 px-2 py-0.5 font-mono text-2xs">
                   URGENCY {result.action_plan?.urgency}
                 </span>
               </div>
-              <p className="text-sm">{result.action_plan?.rationale}</p>
-              <p className="mt-2 text-xs text-white/80">
+              <p className="text-base font-medium">{result.action_plan?.rationale}</p>
+              <p className="mt-2 text-sm opacity-90">
                 If ignored: {result.action_plan?.downside_if_ignored}
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <ol className="mt-4 flex flex-wrap gap-2">
                 {(result.action_plan?.next_steps || []).map((step, i) => (
-                  <span
-                    key={`${i}-${step}`}
-                    className="rounded-lg bg-black/20 px-2.5 py-1 text-xs text-white/90"
-                  >
-                    {i + 1}. {step}
-                  </span>
+                  <li key={`${i}-${step}`} className="rounded-lg bg-black/25 px-3 py-1.5 text-sm">
+                    <span className="font-mono opacity-80">{i + 1}.</span> {step}
+                  </li>
                 ))}
-              </div>
-            </div>
+              </ol>
+            </section>
 
-            <div className="grid gap-6 lg:grid-cols-[auto_1fr]">
+            <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
               <div className="space-y-4">
                 <LexScore score={result.lexscore} label={result.lexscore_label} />
-                <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-4">
-                  <p className="mb-2 font-mono text-[10px] tracking-wider text-slate-500">
-                    SCORE SIMULATOR
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    If negotiation succeeds on selected clauses:
-                  </p>
-                  <div className="mt-2 flex items-end gap-2">
-                    <span className="font-mono text-3xl text-lex-green">{projectedScore}</span>
-                    <span className="text-xs text-slate-400">
-                      ({projectedLabel.replace(/_/g, " ")})
-                    </span>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {riskyClauses.slice(0, 6).map((clause) => (
-                      <label
-                        key={clause.clause_id}
-                        className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-900/40 p-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={simResolved.has(clause.clause_id)}
-                          onChange={(e) => {
-                            setSimResolved((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) next.add(clause.clause_id);
-                              else next.delete(clause.clause_id);
-                              return next;
-                            });
-                          }}
-                          className="mt-0.5"
-                        />
-                        <span className="text-xs text-slate-300">
-                          {clause.clause_id}: {clause.clause_type.replace(/_/g, " ")}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                {riskyClauses.length > 0 && (
+                  <fieldset className="card p-4">
+                    <legend className="sr-only">Score simulator</legend>
+                    <p aria-hidden="true" className="eyebrow mb-2 text-slate-300">
+                      Score simulator
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      Tick the clauses you expect to win in negotiation:
+                    </p>
+                    <p className="mt-2 flex items-end gap-2" aria-live="polite">
+                      <span className="font-mono text-3xl font-bold text-lex-green">
+                        {projectedScore}
+                      </span>
+                      <span className="pb-1 text-sm text-slate-300">
+                        projected ({projectedLabel.replace(/_/g, " ").toLowerCase()})
+                      </span>
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {riskyClauses.slice(0, 6).map((clause) => (
+                        <label
+                          key={clause.clause_id}
+                          className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-lex-border bg-slate-900/40 px-3 py-2 transition-colors hover:border-slate-600"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={simResolved.has(clause.clause_id)}
+                            onChange={(e) => {
+                              setSimResolved((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(clause.clause_id);
+                                else next.delete(clause.clause_id);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 shrink-0 accent-lex-accent"
+                          />
+                          <span className="text-sm text-slate-200">
+                            <span className="font-mono text-slate-400">{clause.clause_id}</span>{" "}
+                            {clause.clause_type.replace(/_/g, " ")}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-6">
+              <div className="min-w-0 space-y-4">
+                <section aria-labelledby="summary-title" className="card p-4 sm:p-6">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-sm font-semibold text-slate-200">Document Summary</h2>
+                    <h2 id="summary-title" className="text-base font-semibold text-white">
+                      Document summary
+                    </h2>
                     <div className="flex flex-wrap items-center gap-2">
-                      <AudioPlayer
-                        endpoint={`/api/analyze/${id}/voice/briefing`}
-                        buttonText="Audio Briefing"
-                        size="sm"
-                      />
+                      {voiceEnabled && (
+                        <AudioPlayer
+                          endpoint={`/api/analyze/${id}/voice/briefing`}
+                          buttonText="Audio briefing"
+                          size="sm"
+                        />
+                      )}
                       <button
+                        type="button"
                         onClick={copyShareLink}
-                        className="rounded border border-slate-700 px-2 py-1 font-mono text-[10px] text-slate-300 hover:border-lex-accent/50"
+                        className="btn-secondary btn-sm"
                       >
-                        {linkCopied ? "Link Copied" : "Copy Report Link"}
+                        {linkCopied ? (
+                          <Check aria-hidden="true" className="h-4 w-4 text-lex-green" />
+                        ) : (
+                          <Link2 aria-hidden="true" className="h-4 w-4" />
+                        )}
+                        <span aria-live="polite">{linkCopied ? "Link copied" : "Copy link"}</span>
                       </button>
-                      <button
-                        onClick={() => handlePackDownload("md")}
-                        disabled={packLoading !== null}
-                        className="rounded border border-slate-700 px-2 py-1 font-mono text-[10px] text-slate-300 hover:border-lex-accent/50 disabled:opacity-40"
-                      >
-                        {packLoading === "md" ? "Building…" : "Export Pack (.md)"}
-                      </button>
-                      <button
-                        onClick={() => handlePackDownload("txt")}
-                        disabled={packLoading !== null}
-                        className="rounded border border-slate-700 px-2 py-1 font-mono text-[10px] text-slate-300 hover:border-lex-accent/50 disabled:opacity-40"
-                      >
-                        {packLoading === "txt" ? "Building…" : "Export Pack (.txt)"}
-                      </button>
+                      {(["md", "txt"] as const).map((fmt) => (
+                        <button
+                          key={fmt}
+                          type="button"
+                          onClick={() => handlePackDownload(fmt)}
+                          disabled={packLoading !== null}
+                          aria-busy={packLoading === fmt}
+                          className="btn-secondary btn-sm"
+                        >
+                          {packLoading === fmt ? (
+                            <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download aria-hidden="true" className="h-4 w-4" />
+                          )}
+                          Pack .{fmt}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <dl className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                     {[
-                      { label: "Total", count: result.summary.total_clauses, color: "#6366f1" },
-                      { label: "Critical", count: result.summary.red_clauses, color: "#ef4444" },
-                      { label: "Warning", count: result.summary.amber_clauses, color: "#f59e0b" },
-                      { label: "Clear", count: result.summary.green_clauses, color: "#22c55e" },
+                      { label: "Clauses", count: result.summary.total_clauses, color: "#a5b4fc" },
+                      { label: "Critical", count: result.summary.red_clauses, color: "#f87171" },
+                      { label: "Warning", count: result.summary.amber_clauses, color: "#fbbf24" },
+                      { label: "Clear", count: result.summary.green_clauses, color: "#4ade80" },
                     ].map((s) => (
                       <div
                         key={s.label}
-                        className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-center"
+                        className="flex flex-col-reverse rounded-xl border border-lex-border bg-slate-900/50 p-3 text-center"
                       >
-                        <p className="font-mono text-xl font-bold" style={{ color: s.color }}>
+                        <dt className="mt-0.5 text-xs text-slate-400">{s.label}</dt>
+                        <dd className="font-mono text-2xl font-bold" style={{ color: s.color }}>
                           {s.count}
-                        </p>
-                        <p className="mt-0.5 text-[10px] text-slate-500">{s.label}</p>
+                        </dd>
                       </div>
                     ))}
-                  </div>
+                  </dl>
 
                   <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-                      <p className="mb-2 font-mono text-[10px] text-slate-500">RISK TAXONOMY</p>
-                      <div className="space-y-1 text-xs text-slate-300">
+                    <div className="rounded-xl border border-lex-border bg-slate-900/40 p-4">
+                      <h3 className="eyebrow mb-2 text-slate-300">Risk taxonomy</h3>
+                      <dl className="space-y-1 text-sm text-slate-300">
                         {Object.entries(result.risk_taxonomy_counts || {}).map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between">
-                            <span>{k.replace(/_/g, " ")}</span>
-                            <span className="font-mono">{v}</span>
+                            <dt className="capitalize">{k.replace(/_/g, " ").toLowerCase()}</dt>
+                            <dd className="font-mono">{v}</dd>
                           </div>
                         ))}
-                      </div>
+                      </dl>
                     </div>
-                    <div className="rounded-lg border border-indigo-500/20 bg-indigo-950/10 p-3">
-                      <p className="mb-2 font-mono text-[10px] text-indigo-300">
-                        WHY ADVERSARIAL &gt; SINGLE AGENT
-                      </p>
-                      <div className="space-y-1 text-xs text-indigo-200">
-                        <p>
-                          Disagreements surfaced:{" "}
-                          {result.adversarial_metrics?.disagreements_count ?? 0}
-                        </p>
-                        <p>
-                          Defenses overturned:{" "}
-                          {result.adversarial_metrics?.defenses_overturned ?? 0}
-                        </p>
-                        <p>
-                          Defensible clauses retained:{" "}
-                          {result.adversarial_metrics?.defensible_clauses ?? 0}
-                        </p>
-                      </div>
+                    <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-4">
+                      <h3 className="eyebrow mb-2 text-indigo-300">Why adversarial helps</h3>
+                      <dl className="space-y-1 text-sm text-indigo-100">
+                        {[
+                          [
+                            "Disagreements surfaced",
+                            result.adversarial_metrics?.disagreements_count ?? 0,
+                          ],
+                          [
+                            "Defenses overturned",
+                            result.adversarial_metrics?.defenses_overturned ?? 0,
+                          ],
+                          [
+                            "Defensible clauses kept",
+                            result.adversarial_metrics?.defensible_clauses ?? 0,
+                          ],
+                        ].map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between">
+                            <dt>{k}</dt>
+                            <dd className="font-mono">{v}</dd>
+                          </div>
+                        ))}
+                      </dl>
                     </div>
                   </div>
 
                   {result.summary.critical_issues?.length > 0 && (
-                    <div className="mt-4 rounded-lg border border-lex-red/15 bg-red-950/10 p-4">
-                      <p className="mb-2 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-red">
-                        ⚠ TOP CRITICAL ISSUES
-                      </p>
+                    <div className="mt-4 rounded-xl border border-lex-red/30 bg-red-950/20 p-4">
+                      <h3 className="eyebrow mb-2 flex items-center gap-1.5 text-lex-red-soft">
+                        <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" />
+                        Top critical issues
+                      </h3>
                       <ul className="space-y-1.5">
                         {result.summary.critical_issues.map((issue: string, i: number) => (
                           <li
                             key={i}
-                            className="flex items-start gap-2 text-xs leading-relaxed text-red-300"
+                            className="flex items-start gap-2 text-sm leading-relaxed text-red-200"
                           >
-                            <span className="mt-0.5 text-lex-red">▸</span>
+                            <span aria-hidden="true" className="mt-0.5 text-lex-red">
+                              ▸
+                            </span>
                             {issue}
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
-                </div>
+                </section>
 
                 {result.document_benchmark?.industry_comparison && (
-                  <div className="rounded-2xl border border-slate-800 bg-lex-card/80 p-6">
+                  <section aria-label="Industry benchmark" className="card p-4 sm:p-6">
                     <div className="mb-2 flex items-baseline gap-3">
-                      <span className="font-mono text-3xl font-bold text-lex-red">
+                      <span className="font-mono text-3xl font-bold text-lex-red-soft">
                         {result.document_benchmark.percentile}th
                       </span>
-                      <span className="text-sm text-slate-500">risk percentile</span>
+                      <span className="text-sm text-slate-400">risk percentile</span>
                     </div>
-                    <p className="text-xs leading-relaxed text-slate-400">
+                    <p className="text-sm leading-relaxed text-slate-300">
                       {result.document_benchmark.industry_comparison}
                     </p>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800"
+                      aria-hidden="true"
+                    >
                       <div
                         className="h-full rounded-full transition-all duration-1000"
                         style={{
@@ -486,142 +635,208 @@ export default function AnalyzePage() {
                         }}
                       />
                     </div>
-                  </div>
+                  </section>
                 )}
 
                 {result.raw_meta?.orchestrator?.jurisdiction_hints?.length ? (
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-xs text-slate-400">
+                  <p className="rounded-xl border border-lex-border bg-slate-900/30 p-4 text-sm text-slate-300">
                     Jurisdiction hints detected:{" "}
-                    {result.raw_meta.orchestrator.jurisdiction_hints.join(", ")}. Legal
-                    enforceability may vary by region.
-                  </div>
+                    {result.raw_meta.orchestrator.jurisdiction_hints.join(", ")}. Enforceability
+                    varies by region.
+                  </p>
                 ) : null}
 
                 {checklist.length > 0 && (
-                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-4">
-                    <p className="mb-2 font-mono text-[10px] tracking-wider text-emerald-300">
-                      ASK ME BEFORE I SIGN CHECKLIST
-                    </p>
-                    <div className="space-y-2">
+                  <section
+                    aria-labelledby="checklist-title"
+                    className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4"
+                  >
+                    <h2 id="checklist-title" className="eyebrow mb-3 text-emerald-300">
+                      Before you sign, ask for
+                    </h2>
+                    <ul className="space-y-2">
                       {checklist.map((item) => (
-                        <div
+                        <li
                           key={item.id}
-                          className="rounded-md border border-emerald-500/20 bg-black/20 p-2 text-xs text-emerald-100"
+                          className="rounded-lg border border-emerald-500/20 bg-black/20 px-3 py-2 text-sm text-emerald-50"
                         >
                           {item.item}
-                        </div>
+                        </li>
                       ))}
-                    </div>
-                  </div>
+                    </ul>
+                  </section>
                 )}
               </div>
             </div>
 
-            {compareResult && (
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-5">
-                <p className="mb-3 font-mono text-[10px] tracking-wider text-slate-400">
-                  COMPARE TWO OFFERS (BETA)
-                </p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-lg border border-slate-800 bg-black/20 p-3">
-                    <p className="text-xs text-slate-500">Current Analysis ({id.slice(0, 8)})</p>
-                    <p className="font-mono text-2xl text-lex-accent">{result.lexscore}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-800 bg-black/20 p-3">
-                    <p className="text-xs text-slate-500">
-                      Compared Analysis ({compareId?.slice(0, 8)})
+            {compareId && (
+              <section aria-labelledby="compare-title" className="card p-5" aria-live="polite">
+                <h2 id="compare-title" className="eyebrow mb-3 text-slate-300">
+                  Offer comparison (beta)
+                </h2>
+                {compareResult ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-lex-border bg-black/20 p-4">
+                        <p className="text-sm text-slate-400">Offer A (this report)</p>
+                        <p className="font-mono text-3xl font-bold text-lex-accent-soft">
+                          {result.lexscore}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-lex-border bg-black/20 p-4">
+                        <p className="text-sm text-slate-400">Offer B</p>
+                        <p className="font-mono text-3xl font-bold text-emerald-300">
+                          {compareResult.lexscore}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm text-slate-300">
+                      {result.lexscore === compareResult.lexscore
+                        ? "Both offers score the same."
+                        : `Offer ${result.lexscore > compareResult.lexscore ? "A" : "B"} is safer by ${Math.abs(
+                            result.lexscore - compareResult.lexscore,
+                          )} points.`}{" "}
+                      Higher scores are safer.
                     </p>
-                    <p className="font-mono text-2xl text-emerald-300">{compareResult.lexscore}</p>
-                  </div>
-                </div>
-                <p className="mt-3 text-xs text-slate-300">
-                  Delta: {result.lexscore - compareResult.lexscore > 0 ? "+" : ""}
-                  {result.lexscore - compareResult.lexscore} points. Higher score is safer.
-                </p>
-              </div>
+                  </>
+                ) : compareFailed ? (
+                  <p className="text-sm text-lex-red-soft">
+                    The second analysis failed, so there&apos;s nothing to compare against.
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-2 text-sm text-slate-300">
+                    <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    Still analyzing offer B…
+                  </p>
+                )}
+              </section>
             )}
 
             {result.missing_protections?.length > 0 && (
-              <div className="rounded-2xl border border-indigo-500/15 bg-indigo-950/10 p-6">
-                <p className="mb-3 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-accent">
-                  ⬡ MISSING PROTECTIONS
-                </p>
-                <div className="flex flex-wrap gap-2">
+              <section
+                aria-labelledby="missing-title"
+                className="rounded-2xl border border-indigo-500/25 bg-indigo-950/20 p-5 sm:p-6"
+              >
+                <h2 id="missing-title" className="eyebrow mb-3 text-lex-accent-soft">
+                  Missing protections
+                </h2>
+                <ul className="flex flex-wrap gap-2">
                   {result.missing_protections.map((p: string, i: number) => (
-                    <span
+                    <li
                       key={i}
-                      className="rounded-lg border border-lex-accent/15 bg-lex-accent/5 px-3 py-1.5 text-xs text-indigo-300"
+                      className="rounded-lg border border-lex-accent/25 bg-lex-accent/10 px-3 py-1.5 text-sm text-indigo-200"
                     >
                       {p}
-                    </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            <section aria-labelledby="clauses-title" className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="clauses-title" className="text-lg font-semibold text-white">
+                  Clause breakdown
+                </h2>
+                <div
+                  role="group"
+                  aria-label="Filter clauses by verdict"
+                  className="flex gap-1 rounded-xl border border-lex-border bg-lex-card/50 p-1"
+                >
+                  {(["ALL", "RED", "AMBER", "GREEN"] as Filter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFilter(f)}
+                      aria-pressed={filter === f}
+                      aria-label={`Show ${f === "ALL" ? "all" : f.toLowerCase()} clauses (${filterCounts[f]})`}
+                      className={`min-h-[40px] rounded-lg px-3 font-mono text-2xs font-bold tracking-wider transition-colors ${
+                        filter === f
+                          ? f === "RED"
+                            ? "bg-lex-red/20 text-red-300"
+                            : f === "AMBER"
+                              ? "bg-lex-amber/20 text-amber-300"
+                              : f === "GREEN"
+                                ? "bg-lex-green/20 text-green-300"
+                                : "bg-lex-accent/25 text-indigo-200"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      {f} <span className="opacity-70">{filterCounts[f]}</span>
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-white">Clause Breakdown</h2>
-              <div className="flex gap-1 rounded-lg border border-slate-800 bg-lex-card/50 p-1">
-                {(["ALL", "RED", "AMBER", "GREEN"] as Filter[]).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`rounded-md px-3 py-1.5 font-mono text-[10px] font-bold tracking-wider transition-all ${
-                      filter === f
-                        ? f === "RED"
-                          ? "bg-lex-red/15 text-lex-red"
-                          : f === "AMBER"
-                            ? "bg-lex-amber/15 text-lex-amber"
-                            : f === "GREEN"
-                              ? "bg-lex-green/15 text-lex-green"
-                              : "bg-lex-accent/15 text-lex-accent"
-                        : "text-slate-600 hover:text-slate-400"
-                    }`}
-                  >
-                    {f}
-                  </button>
+              <div className="stagger-children space-y-3">
+                {filteredClauses.map((c) => (
+                  <ClauseCard
+                    key={c.clause_id}
+                    clause={c}
+                    analysisId={id}
+                    voiceEnabled={voiceEnabled}
+                  />
                 ))}
               </div>
-            </div>
-
-            <div className="stagger-children space-y-3">
-              {filteredClauses.map((c) => (
-                <ClauseCard key={c.clause_id} clause={c} analysisId={id} />
-              ))}
               {filteredClauses.length === 0 && (
-                <p className="py-8 text-center text-sm text-slate-600">
-                  No {filter.toLowerCase()} clauses found.
-                </p>
+                <div className="rounded-2xl border border-dashed border-slate-700 py-10 text-center">
+                  <p className="text-sm text-slate-300">
+                    No {filter.toLowerCase()} clauses in this document.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setFilter("ALL")}
+                    className="mt-3 text-sm font-medium text-lex-accent-soft underline-offset-4 hover:underline"
+                  >
+                    Show all clauses
+                  </button>
+                </div>
               )}
-            </div>
+            </section>
           </div>
         )}
       </main>
 
       {chatOpen && result && (
-        <div className="fixed bottom-0 right-0 z-50 w-full max-w-md animate-fade-in-up md:bottom-6 md:right-6">
-          <div className="flex h-[28rem] flex-col rounded-t-2xl border border-slate-700 bg-lex-bg shadow-2xl md:rounded-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+        <div
+          id="contract-chat"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="chat-title"
+          className="fixed bottom-0 right-0 z-50 w-full animate-fade-in-up sm:bottom-6 sm:right-6 sm:max-w-md"
+        >
+          <div className="flex h-[min(32rem,85dvh)] flex-col rounded-t-2xl border border-slate-700 bg-lex-bg shadow-2xl sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-lex-border px-5 py-3">
               <div>
-                <p className="text-sm font-semibold text-white">Ask about this contract</p>
-                <p className="text-[10px] text-slate-500">
+                <h2 id="chat-title" className="text-sm font-semibold text-white">
+                  Ask about this contract
+                </h2>
+                <p className="text-xs text-slate-400">
                   LEXSCORE {result.lexscore} · {result.summary.total_clauses} clauses
                 </p>
               </div>
               <button
                 type="button"
                 aria-label="Close chat"
-                onClick={() => setChatOpen(false)}
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800"
+                onClick={() => {
+                  setChatOpen(false);
+                  chatToggleRef.current?.focus();
+                }}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800"
               >
-                ✕
+                <X aria-hidden="true" className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <div
+              className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation"
+            >
               {chatMessages.length === 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs text-slate-500">Try asking:</p>
+                  <p className="text-sm text-slate-400">Try asking:</p>
                   {[
                     "What is the single most dangerous clause?",
                     "Which 2 edits will raise my score fastest?",
@@ -629,10 +844,12 @@ export default function AnalyzePage() {
                   ].map((q) => (
                     <button
                       key={q}
+                      type="button"
                       onClick={() => {
                         setChatInput(q);
+                        chatInputRef.current?.focus();
                       }}
-                      className="block w-full rounded-lg border border-slate-800 px-3 py-2 text-left text-xs text-slate-400 transition-colors hover:border-lex-accent/30 hover:bg-lex-accent/5"
+                      className="block min-h-[44px] w-full rounded-lg border border-lex-border px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:border-lex-accent/40 hover:bg-lex-accent/10"
                     >
                       {q}
                     </button>
@@ -642,40 +859,47 @@ export default function AnalyzePage() {
               {chatMessages.map((msg, i) => (
                 <div
                   key={i}
-                  className={`whitespace-pre-wrap rounded-xl px-4 py-3 text-xs leading-relaxed ${
+                  className={`whitespace-pre-wrap rounded-xl px-4 py-3 text-sm leading-relaxed ${
                     msg.role === "user"
-                      ? "ml-8 bg-lex-accent/10 text-indigo-200"
-                      : "mr-8 bg-slate-800 text-slate-300"
+                      ? "ml-8 bg-lex-accent/20 text-indigo-100"
+                      : "mr-8 bg-slate-800 text-slate-200"
                   }`}
                 >
+                  <span className="sr-only">{msg.role === "user" ? "You: " : "LEXGUARD: "}</span>
                   {formatMessage(msg.content)}
                 </div>
               ))}
               {chatLoading && (
-                <div className="mr-8 rounded-xl bg-slate-800 px-4 py-3 text-xs text-slate-500">
-                  <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-600 border-t-slate-400" />{" "}
+                <div className="mr-8 flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-sm text-slate-300">
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
                   Thinking…
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
-            <form onSubmit={handleChat} className="border-t border-slate-800 px-4 py-3">
+            <form onSubmit={handleChat} className="border-t border-lex-border px-4 py-3">
               <div className="flex gap-2">
+                <label htmlFor="chat-input" className="sr-only">
+                  Ask a question about this contract
+                </label>
                 <input
+                  id="chat-input"
+                  ref={chatInputRef}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  aria-label="Ask a question about this contract"
                   maxLength={2000}
+                  autoComplete="off"
                   placeholder="Ask about this contract…"
-                  className="flex-1 rounded-lg border border-slate-800 bg-lex-card/50 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-lex-accent/30 focus:outline-none"
+                  className="field min-h-[44px] flex-1 px-3 py-2"
                 />
                 <button
                   type="submit"
                   disabled={chatLoading || !chatInput.trim()}
-                  className="rounded-lg bg-lex-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-30"
+                  aria-label="Send question"
+                  className="btn-primary min-h-[44px] w-12 px-0"
                 >
-                  →
+                  <Send aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
             </form>
