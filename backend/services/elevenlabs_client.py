@@ -1,68 +1,63 @@
-import os
-import io
-import json
-from fastapi import HTTPException
-from elevenlabs import ElevenLabs
+"""ElevenLabs text-to-speech helpers.
 
-def get_client() -> ElevenLabs:
-    from config import ELEVENLABS_API_KEY
-    if not ELEVENLABS_API_KEY:
-         raise ValueError("ELEVENLABS_API_KEY is not set.")
-    return ElevenLabs(api_key=ELEVENLABS_API_KEY)
+The ElevenLabs SDK is synchronous, so calls are pushed onto a worker thread
+to avoid blocking the event loop.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from fastapi import HTTPException
+
+import config
+
+logger = logging.getLogger(__name__)
+
+
+def is_configured() -> bool:
+    return bool(config.ELEVENLABS_API_KEY)
+
+
+def _synthesize(text: str, voice_id: str) -> bytes:
+    from elevenlabs import ElevenLabs
+
+    client = ElevenLabs(api_key=config.ELEVENLABS_API_KEY)
+    chunks = client.text_to_speech.convert(
+        voice_id=voice_id, text=text, model_id=config.ELEVENLABS_MODEL_ID
+    )
+    return b"".join(chunks)
+
+
+async def synthesize(text: str, voice_id: str | None = None) -> bytes:
+    if not is_configured():
+        raise HTTPException(status_code=503, detail="Voice features are not configured")
+    try:
+        return await asyncio.to_thread(
+            _synthesize, text, voice_id or config.ELEVENLABS_NARRATOR_VOICE_ID
+        )
+    except Exception as exc:
+        logger.exception("ElevenLabs synthesis failed")
+        raise HTTPException(status_code=502, detail="Text-to-speech provider error") from exc
+
 
 async def generate_audio_briefing(text: str) -> bytes:
-    """Generates a 60s summary audio."""
-    client = get_client()
-    try:
-        # Using a professional narrator voice (e.g. Chris)
-        audio_generator = client.text_to_speech.convert(
-            voice_id="iP95p4xoKVk53GoZ742B", 
-            text=text,
-            model_id="eleven_multilingual_v2" # Supports Indian languages too
-        )
-        audio_bytes = b"".join(list(audio_generator))
-        return audio_bytes
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Narrated summary of an analysis."""
+    return await synthesize(text)
+
 
 async def generate_negotiation_coach(text: str) -> bytes:
-    """Generates negotiation pushback audio."""
-    client = get_client()
-    try:
-        audio_generator = client.text_to_speech.convert(
-            voice_id="iP95p4xoKVk53GoZ742B", 
-            text=text,
-            model_id="eleven_multilingual_v2"
-        )
-        audio_bytes = b"".join(list(audio_generator))
-        return audio_bytes
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Narrated negotiation pushback for a single clause."""
+    return await synthesize(text)
+
 
 async def generate_agent_debate(risk_hunter_text: str, devils_advocate_text: str) -> bytes:
-    """Generates a 2-voice debate."""
-    client = get_client()
-    # Currently elevenlabs python sdk might not have text_to_dialogue.convert exposed in all versions yet.
-    # As a fallback, we can synthesize two audios and stitch them, or we can just synthesize the text sequentially using standard TTS 
-    # but the API specifies Text-to-Speech only for now unless we do multiple calls.
-    # We will do two calls and concatenate the mp3 bytes.
-    
-    try:
-        # George for Risk Hunter
-        rh_audio = b"".join(list(client.text_to_speech.convert(
-            voice_id="JBFqnCBsd6RMkjVDRZzb",
-            text=f"Risk Hunter here. {risk_hunter_text}",
-            model_id="eleven_multilingual_v2"
-        )))
-        
-        # Aria for Devil's Advocate
-        da_audio = b"".join(list(client.text_to_speech.convert(
-            voice_id="9BWtsMINqrJLrRacOk9x",
-            text=f"Devil's Advocate here. {devils_advocate_text}",
-            model_id="eleven_multilingual_v2"
-        )))
-        
-        # Concatenate MP3s (basic concatenation works for raw mp3 streams often, or we use pydub if needed, but we try basic concat first)
-        return rh_audio + da_audio
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
+    """Two-voice debate: both MP3 segments are synthesized concurrently and concatenated."""
+    risk, defense = await asyncio.gather(
+        synthesize(f"Risk Hunter here. {risk_hunter_text}", config.ELEVENLABS_RISK_HUNTER_VOICE_ID),
+        synthesize(
+            f"Devil's Advocate here. {devils_advocate_text}", config.ELEVENLABS_DEFENDER_VOICE_ID
+        ),
+    )
+    return risk + defense

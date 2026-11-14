@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-import json
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from agents import comparator, devils_advocate, extractor, orchestrator, risk_hunter, synthesis
 from models.schemas import (
@@ -17,7 +16,7 @@ from models.schemas import (
 )
 from services import analysis_store
 
-AwaitsEvent = Callable[[dict[str, Any]], Any]
+EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 RISK_TYPES = {"EXPLOIT", "LIABILITY", "AMBIGUITY", "PRACTICAL_RISK", "MISSING"}
 VERDICT_RANK = {"RED": 3, "AMBER": 2, "GREEN": 1}
 
@@ -187,7 +186,7 @@ def build_final_result(
         weaker_party=doc_meta.get("weaker_party", "unknown"),
         lexscore=max(0, min(100, lexscore)),
         lexscore_label=label,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         status="complete",
         summary=AnalysisSummary(
             total_clauses=len(clauses),
@@ -216,7 +215,7 @@ def build_final_result(
 async def run_analysis(
     analysis_id: str,
     document_text: str,
-    emit: AwaitsEvent | None = None,
+    emit: EventCallback | None = None,
 ) -> LexGuardAnalysis:
     async def _emit(event: dict[str, Any]) -> None:
         analysis_store.append_event(analysis_id, event)
@@ -242,7 +241,7 @@ async def run_analysis(
         }
     )
 
-    # ── Agents 2 & 3: Risk Hunter + Devil's Advocate in PARALLEL ──
+    # ── Agents 2 & 3: Risk Hunter, then Devil's Advocate rebutting its findings ──
     await _emit({"agent": "risk_hunter", "status": "running"})
     risks_result = await risk_hunter.run(clauses, doc_meta)
     risks = risks_result.get("risk_assessments", [])
@@ -273,10 +272,6 @@ async def run_analysis(
         analysis_id, doc_meta, clauses, risks, defenses, synthesis_result, benchmark_result
     )
     analysis_store.save_result(analysis_id, final)
-    await _emit({"type": "complete", "data": final.model_dump()})
+    # The full result lives on the record; the stream endpoint attaches it to this marker.
+    await _emit({"type": "complete"})
     return final
-
-
-async def stream_existing_events(analysis_id: str) -> AsyncGenerator[str, None]:
-    for event in analysis_store.get_events(analysis_id):
-        yield f"data: {json.dumps(event)}\n\n"

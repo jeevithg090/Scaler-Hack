@@ -1,35 +1,49 @@
+"""LEXGUARD API — adversarial multi-agent contract analysis."""
+
 from __future__ import annotations
 
 import asyncio
 import json
-import os
+import logging
 import time
-from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlencode
-from typing import Optional
-from typing import AsyncGenerator
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from twilio.twiml.voice_response import VoiceResponse
 
-from config import GEMINI_MODEL, MAX_UPLOAD_BYTES, PUBLIC_BASE_URL
+import config
 from models.schemas import AnalyzeResponse, HealthResponse
-from services import analysis_store, document_parser, pipeline, twilio_client
-
-app = FastAPI(title="LEXGUARD API", version="0.1.0")
-APP_STARTED_AT = datetime.now(timezone.utc)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from security import require_admin, require_custom_llm_key, sign_text, verify_text_signature
+from services import (
+    analysis_store,
+    document_parser,
+    elevenlabs_client,
+    gemini_client,
+    pipeline,
+    twilio_client,
 )
+from services.negotiation_pack import briefing_script, build_negotiation_pack
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("lexguard")
+
+APP_VERSION = "0.2.0"
 AGENT_NAMES = [
     "orchestrator",
     "extractor",
@@ -38,46 +52,117 @@ AGENT_NAMES = [
     "synthesis",
     "comparator",
 ]
+STREAM_POLL_SECONDS = 0.4
+STREAM_MAX_SECONDS = 600
+MAX_TTS_CHARS = 1000
+
+app = FastAPI(title="LEXGUARD API", version=APP_VERSION)
+APP_STARTED_AT = datetime.now(UTC)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
+# ── Request models ────────────────────────────────────────────────
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=config.MAX_CHAT_MESSAGE_CHARS)
+
+
+class OutboundCallRequest(BaseModel):
+    to_number: str = Field(pattern=r"^\+[1-9]\d{6,14}$", description="E.164 phone number")
+    analysis_id: str | None = None
+    message: str | None = Field(default=None, max_length=MAX_TTS_CHARS)
+
+
+class OpenAIMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatCompletionRequest(BaseModel):
+    messages: list[OpenAIMessage]
+    model: str
+    temperature: float | None = 0.7
+    max_tokens: int | None = None
+    stream: bool | None = False
+    elevenlabs_extra_body: dict[str, Any] | None = None
+
+
+# ── Helpers ───────────────────────────────────────────────────────
+def _require_complete_analysis(analysis_id: str) -> dict[str, Any]:
+    data = analysis_store.get_analysis(analysis_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if data.get("status") != "complete":
+        raise HTTPException(status_code=409, detail="Analysis not yet complete")
+    return data
+
+
+def _find_clause(data: dict[str, Any], clause_id: str) -> dict[str, Any]:
+    clause = next((c for c in data.get("clauses", []) if c.get("clause_id") == clause_id), None)
+    if not clause:
+        raise HTTPException(status_code=404, detail="Clause not found")
+    return clause
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+async def _run_background(analysis_id: str, document_text: str) -> None:
+    try:
+        await pipeline.run_analysis(analysis_id, document_text)
+    except Exception as exc:
+        logger.exception("Analysis %s failed", analysis_id)
+        message = (
+            str(exc) if isinstance(exc, gemini_client.GeminiError) else "Analysis pipeline failed"
+        )
+        analysis_store.update_status(analysis_id, "error")
+        analysis_store.append_event(analysis_id, {"type": "error", "message": message})
+
+
+# ── Health ────────────────────────────────────────────────────────
 @app.get("/api/health", response_model=HealthResponse)
-async def health():
-    now = datetime.now(timezone.utc)
-    uptime_seconds = int((now - APP_STARTED_AT).total_seconds())
+async def health() -> HealthResponse:
+    uptime_seconds = int((datetime.now(UTC) - APP_STARTED_AT).total_seconds())
     return HealthResponse(
         status="ok",
-        model=GEMINI_MODEL,
+        version=APP_VERSION,
+        model=config.GEMINI_MODEL,
         agents=AGENT_NAMES,
         uptime_seconds=uptime_seconds,
         queue_depth=analysis_store.queue_depth(),
         environment={
-            "gcp_project_id": bool(os.environ.get("GCP_PROJECT_ID")),
-            "gcs_bucket_name": bool(os.environ.get("GCS_BUCKET_NAME")),
-            "google_application_credentials": bool(
-                os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-            ),
-            "elevenlabs_api_key": bool(os.environ.get("ELEVENLABS_API_KEY")),
-            "twilio_account_sid": bool(os.environ.get("TWILIO_ACCOUNT_SID")),
-            "twilio_auth_token": bool(os.environ.get("TWILIO_AUTH_TOKEN")),
-            "twilio_from_number": bool(os.environ.get("TWILIO_FROM_NUMBER")),
-            "public_base_url": bool(os.environ.get("PUBLIC_BASE_URL")),
+            "gemini_api_key": bool(config.GEMINI_API_KEY),
+            "firestore": config.USE_FIRESTORE,
+            "gcs_bucket_name": bool(config.GCS_BUCKET_NAME),
+            "elevenlabs": elevenlabs_client.is_configured(),
+            "twilio": twilio_client.is_configured(),
+            "outbound_calls_enabled": bool(config.ADMIN_API_TOKEN),
+            "custom_llm_enabled": bool(config.CUSTOM_LLM_API_KEY),
         },
     )
 
 
+# ── Analysis ──────────────────────────────────────────────────────
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 async def analyze(
     background_tasks: BackgroundTasks,
-    file: Optional[UploadFile] = File(None),
-    text: Optional[str] = Form(None),
-    url: Optional[str] = Form(None),
-):
-    file_bytes: Optional[bytes] = None
-    filename: Optional[str] = None
+    file: UploadFile | None = File(None),
+    text: str | None = Form(None),
+    url: str | None = Form(None),
+) -> AnalyzeResponse:
+    file_bytes: bytes | None = None
+    filename: str | None = None
 
     if file and file.filename:
-        file_bytes = await file.read()
-        if len(file_bytes) > MAX_UPLOAD_BYTES:
+        file_bytes = await file.read(config.MAX_UPLOAD_BYTES + 1)
+        if len(file_bytes) > config.MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
         filename = file.filename
 
@@ -85,60 +170,55 @@ async def analyze(
         document_text = await document_parser.extract_text_from_url(url)
     else:
         document_text = document_parser.extract_text(filename, file_bytes, text)
-    if len(document_text) < 50:
+
+    if len(document_text) < config.MIN_DOCUMENT_CHARS:
         raise HTTPException(
             status_code=400,
             detail="Document too short — paste at least ~50 characters",
         )
 
     analysis_id = analysis_store.create_analysis(document_text)
-
     background_tasks.add_task(_run_background, analysis_id, document_text)
     return AnalyzeResponse(analysis_id=analysis_id)
 
 
-async def _run_background(analysis_id: str, document_text: str) -> None:
-    try:
-        await pipeline.run_analysis(analysis_id, document_text)
-    except Exception as e:
-        analysis_store.update_status(analysis_id, "error")
-        analysis_store.append_event(
-            analysis_id, {"type": "error", "message": str(e)}
-        )
-
-
 @app.get("/api/analyze/{analysis_id}")
-async def get_analysis(analysis_id: str):
+async def get_analysis(analysis_id: str) -> dict[str, Any]:
     data = analysis_store.get_analysis(analysis_id)
     if not data:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    return data
+    return analysis_store.public_view(data)
 
 
 @app.get("/api/analyze/{analysis_id}/stream")
-async def stream_analysis(analysis_id: str):
+async def stream_analysis(analysis_id: str) -> StreamingResponse:
     if not analysis_store.get_analysis(analysis_id):
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     async def event_generator() -> AsyncGenerator[str, None]:
         seen = 0
-        while True:
-            events = analysis_store.get_events(analysis_id)
-            while seen < len(events):
-                yield f"data: {json.dumps(events[seen])}\n\n"
+        deadline = time.monotonic() + STREAM_MAX_SECONDS
+        while time.monotonic() < deadline:
+            record = analysis_store.get_analysis(analysis_id) or {}
+            events = record.get("events", [])
+            for event in events[seen:]:
                 seen += 1
-                if events[seen - 1].get("type") == "complete":
+                if event.get("type") == "complete":
+                    yield _sse({"type": "complete", "data": analysis_store.public_view(record)})
                     return
-                if events[seen - 1].get("type") == "error":
+                yield _sse(event)
+                if event.get("type") == "error":
                     return
 
-            record = analysis_store.get_analysis(analysis_id) or {}
-            if record.get("status") in ("complete", "error"):
-                if seen >= len(events):
-                    if record.get("status") == "complete" and "lexscore" in record:
-                        yield f"data: {json.dumps({'type': 'complete', 'data': record})}\n\n"
-                    break
-            await asyncio.sleep(0.4)
+            status = record.get("status")
+            if status == "complete" and "lexscore" in record:
+                yield _sse({"type": "complete", "data": analysis_store.public_view(record)})
+                return
+            if status == "error" or not record:
+                yield _sse({"type": "error", "message": "Analysis failed"})
+                return
+            await asyncio.sleep(STREAM_POLL_SECONDS)
+        yield _sse({"type": "error", "message": "Analysis timed out"})
 
     return StreamingResponse(
         event_generator(),
@@ -147,32 +227,11 @@ async def stream_analysis(analysis_id: str):
     )
 
 
-# ── Follow-up chat ────────────────────────────────────────────────
-class ChatRequest(BaseModel):
-    message: str
-
-
-class OutboundCallRequest(BaseModel):
-    to_number: str
-    analysis_id: Optional[str] = None
-    message: Optional[str] = None
-
-
-def _require_complete_analysis(analysis_id: str) -> dict:
-    data = analysis_store.get_analysis(analysis_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    if data.get("status") != "complete":
-        raise HTTPException(status_code=400, detail="Analysis not yet complete")
-    return data
-
-
 @app.post("/api/analyze/{analysis_id}/chat")
-async def chat(analysis_id: str, body: ChatRequest):
+async def chat(analysis_id: str, body: ChatRequest) -> dict[str, str]:
     from agents import chat as chat_agent
 
     data = _require_complete_analysis(analysis_id)
-
     clauses_summary = [
         {
             "clause_id": c.get("clause_id"),
@@ -184,174 +243,85 @@ async def chat(analysis_id: str, body: ChatRequest):
         }
         for c in data.get("clauses", [])
     ]
-
-    reply = await chat_agent.run(
-        message=body.message,
-        doc_type=data.get("doc_type", "other"),
-        weaker_party=data.get("weaker_party", "unknown"),
-        lexscore=data.get("lexscore", 0),
-        clause_analysis=clauses_summary,
-        critical_issues=data.get("summary", {}).get("critical_issues", []),
-        missing_protections=data.get("missing_protections", []),
-    )
-
+    try:
+        reply = await chat_agent.run(
+            message=body.message,
+            doc_type=data.get("doc_type", "other"),
+            weaker_party=data.get("weaker_party", "unknown"),
+            lexscore=data.get("lexscore", 0),
+            clause_analysis=clauses_summary,
+            critical_issues=data.get("summary", {}).get("critical_issues", []),
+            missing_protections=data.get("missing_protections", []),
+        )
+    except gemini_client.GeminiError as exc:
+        logger.warning("Chat failed for %s: %s", analysis_id, exc)
+        raise HTTPException(status_code=502, detail="The language model is unavailable") from exc
     return {"reply": reply}
 
 
-# ── Negotiation export pack ───────────────────────────────────────
-def _build_negotiation_pack(data: dict) -> str:
-    clauses = data.get("clauses", [])
-    risky = [c for c in clauses if c.get("verdict") in {"RED", "AMBER"}]
-    risky = sorted(risky, key=lambda c: (0 if c.get("verdict") == "RED" else 1, c.get("clause_id", "")))
-    top_risky = risky[:5]
-
-    lines: list[str] = []
-    lines.append("# LEXGUARD Negotiation Pack")
-    lines.append("")
-    lines.append(f"- Analysis ID: {data.get('analysis_id')}")
-    lines.append(f"- LEXSCORE: {data.get('lexscore')} ({str(data.get('lexscore_label', '')).replace('_', ' ')})")
-    lines.append(f"- Document Type: {str(data.get('doc_type', 'other')).replace('_', ' ')}")
-    lines.append(f"- Weaker Party: {data.get('weaker_party', 'unknown')}")
-    lines.append("")
-    lines.append("## Top Risky Clauses")
-    lines.append("")
-    if not top_risky:
-        lines.append("No RED/AMBER clauses detected.")
-    for idx, clause in enumerate(top_risky, start=1):
-        lines.append(f"### {idx}. {clause.get('clause_id')} — {clause.get('clause_type', '').replace('_', ' ')}")
-        lines.append(f"- Verdict: {clause.get('verdict')} | Severity: {clause.get('severity')}")
-        lines.append(f"- Plain English: {clause.get('plain_english', '')}")
-        lines.append(f"- Worst Case: {clause.get('worst_case', '')}")
-        lines.append(f"- Ask For: {clause.get('negotiation_script', '')}")
-        lines.append("")
-
-    lines.append("## Ready-to-send Negotiation Email")
-    lines.append("")
-    lines.append("Subject: Request to revise a few contract terms")
-    lines.append("")
-    lines.append("Hi [Name],")
-    lines.append("")
-    lines.append(
-        "Thank you for sharing the agreement. I reviewed the terms and I am aligned on the overall intent. "
-        "Before signing, I would like to request a few clause-level edits to make the terms balanced for both sides:"
-    )
-    lines.append("")
-    for clause in top_risky:
-        ask = clause.get("negotiation_script", "")
-        lines.append(f"- {clause.get('clause_id')}: {ask}")
-    lines.append("")
-    lines.append("I can sign immediately after these updates are reflected in the next draft.")
-    lines.append("")
-    lines.append("Best regards,")
-    lines.append("[Your Name]")
-    lines.append("")
-    lines.append("## Clause-by-clause Redlines")
-    lines.append("")
-    for clause in top_risky:
-        lines.append(f"### {clause.get('clause_id')}")
-        lines.append("Current:")
-        lines.append(clause.get("original_text", ""))
-        lines.append("")
-        lines.append("Proposed:")
-        lines.append(clause.get("suggested_redline", ""))
-        lines.append("")
-
-    return "\n".join(lines).strip() + "\n"
-
-
 @app.get("/api/analyze/{analysis_id}/negotiation-pack", response_class=PlainTextResponse)
-async def negotiation_pack(analysis_id: str, format: str = "md"):
+async def negotiation_pack(
+    analysis_id: str, format: str = Query("md", pattern="^(md|txt)$")
+) -> PlainTextResponse:
     data = _require_complete_analysis(analysis_id)
-    body = _build_negotiation_pack(data)
-    ext = "txt" if format.lower() == "txt" else "md"
     return PlainTextResponse(
-        body,
+        build_negotiation_pack(data),
         headers={
             "Content-Disposition": (
-                f'attachment; filename="lexguard-negotiation-pack-{analysis_id[:8]}.{ext}"'
+                f'attachment; filename="lexguard-negotiation-pack-{analysis_id[:8]}.{format}"'
             )
         },
     )
 
 
-# ── ElevenLabs Voice Features ─────────────────────────────────────
-from services import elevenlabs_client
-
-
-def _analysis_briefing_script(data: dict) -> str:
-    lexscore = data.get("lexscore", 0)
-    critical_issues = data.get("summary", {}).get("critical_issues", [])
-    top_issue = critical_issues[0] if critical_issues else "no major issues"
-    return (
-        f"Here is your contract briefing. The LEXSCORE is {lexscore} out of 100. "
-        f"The most critical issue is {top_issue}. Please review the red clauses carefully."
-    )
-
+# ── ElevenLabs voice features ─────────────────────────────────────
 @app.post("/api/analyze/{analysis_id}/voice/briefing")
-async def voice_briefing(analysis_id: str):
+async def voice_briefing(analysis_id: str) -> Response:
     data = _require_complete_analysis(analysis_id)
-
-    script = _analysis_briefing_script(data)
-
-    audio = await elevenlabs_client.generate_audio_briefing(script)
+    audio = await elevenlabs_client.generate_audio_briefing(briefing_script(data))
     return Response(content=audio, media_type="audio/mpeg")
+
 
 @app.post("/api/analyze/{analysis_id}/voice/debate/{clause_id}")
-async def voice_debate(analysis_id: str, clause_id: str):
-    data = _require_complete_analysis(analysis_id)
-        
-    clause = next((c for c in data.get("clauses", []) if c.get("clause_id") == clause_id), None)
-    if not clause:
-        raise HTTPException(status_code=404, detail="Clause not found")
-        
-    # We create a fake debate from the plain english / negotiation script if we don't have separate agent logs stored.
-    # We can ask Gemini to synthesize a debate quickly or just use the data we have.
-    # To keep latency low, we just use the clause data.
-    rh_text = clause.get("plain_english", "This clause is risky.")
-    da_text = "It's standard practice. " + clause.get("negotiation_script", "We can just ask them to remove it.")
-    
-    audio = await elevenlabs_client.generate_agent_debate(rh_text, da_text)
+async def voice_debate(analysis_id: str, clause_id: str) -> Response:
+    clause = _find_clause(_require_complete_analysis(analysis_id), clause_id)
+    risk_text = clause.get("plain_english") or "This clause is risky."
+    defense_text = clause.get("defense_argument") or "It's standard practice."
+    audio = await elevenlabs_client.generate_agent_debate(risk_text, defense_text)
     return Response(content=audio, media_type="audio/mpeg")
 
+
 @app.post("/api/analyze/{analysis_id}/voice/negotiate/{clause_id}")
-async def voice_negotiate(analysis_id: str, clause_id: str):
-    data = _require_complete_analysis(analysis_id)
-        
-    clause = next((c for c in data.get("clauses", []) if c.get("clause_id") == clause_id), None)
-    if not clause:
-        raise HTTPException(status_code=404, detail="Clause not found")
-        
-    script = clause.get("negotiation_script", "I cannot agree to this clause.")
+async def voice_negotiate(analysis_id: str, clause_id: str) -> Response:
+    clause = _find_clause(_require_complete_analysis(analysis_id), clause_id)
+    script = clause.get("negotiation_script") or "I cannot agree to this clause."
     audio = await elevenlabs_client.generate_negotiation_coach(script)
     return Response(content=audio, media_type="audio/mpeg")
 
 
-# ── Twilio + ElevenLabs Call Flow ─────────────────────────────────
-def _fallback_call_script() -> str:
-    return (
-        "Hello from LEXGUARD. Your contract analysis call is ready. "
-        "Please open the app to review full details and suggested redlines."
-    )
+# ── Twilio call flow ──────────────────────────────────────────────
+FALLBACK_CALL_SCRIPT = (
+    "Hello from LEXGUARD. Your contract analysis call is ready. "
+    "Please open the app to review full details and suggested redlines."
+)
 
 
-def _resolve_call_script(analysis_id: Optional[str], message: Optional[str]) -> str:
+def _resolve_call_script(analysis_id: str | None, message: str | None) -> str:
     if message and message.strip():
-        return message.strip()
+        return message.strip()[:MAX_TTS_CHARS]
     if analysis_id:
         data = analysis_store.get_analysis(analysis_id)
         if data and data.get("status") == "complete":
-            return _analysis_briefing_script(data)
-    return _fallback_call_script()
+            return briefing_script(data)
+    return FALLBACK_CALL_SCRIPT
 
 
-@app.post("/api/twilio/call")
-async def create_twilio_call(body: OutboundCallRequest):
-    if body.analysis_id:
-        data = analysis_store.get_analysis(body.analysis_id)
-        if not data:
-            raise HTTPException(status_code=404, detail="Analysis not found")
-
-    call = twilio_client.create_outbound_call(
+@app.post("/api/twilio/call", dependencies=[Depends(require_admin)])
+async def create_twilio_call(body: OutboundCallRequest) -> dict[str, Any]:
+    if body.analysis_id and not analysis_store.get_analysis(body.analysis_id):
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    call = await asyncio.to_thread(
+        twilio_client.create_outbound_call,
         to_number=body.to_number,
         analysis_id=body.analysis_id,
         custom_message=body.message,
@@ -361,19 +331,17 @@ async def create_twilio_call(body: OutboundCallRequest):
 
 @app.api_route("/api/twilio/voice", methods=["GET", "POST"])
 async def twilio_voice_webhook(
-    analysis_id: Optional[str] = None,
-    message: Optional[str] = None,
-):
+    analysis_id: str | None = None,
+    message: str | None = None,
+) -> Response:
     twiml = VoiceResponse()
     script = _resolve_call_script(analysis_id=analysis_id, message=message)
-    base_url = PUBLIC_BASE_URL.rstrip("/")
-    has_elevenlabs = bool(os.environ.get("ELEVENLABS_API_KEY"))
 
-    if has_elevenlabs and base_url:
-        play_url = f"{base_url}/api/twilio/tts.mp3?{urlencode({'text': script})}"
-        twiml.play(play_url)
+    if elevenlabs_client.is_configured() and config.PUBLIC_BASE_URL and config.TTS_SIGNING_SECRET:
+        query = urlencode({"text": script, "sig": sign_text(script)})
+        twiml.play(f"{config.PUBLIC_BASE_URL}/api/twilio/tts.mp3?{query}")
     else:
-        # Fallback to native Twilio TTS if ElevenLabs or public URL is not configured.
+        # Native Twilio TTS when ElevenLabs or a public URL is not configured.
         twiml.say(script, voice="alice")
 
     twiml.hangup()
@@ -381,92 +349,72 @@ async def twilio_voice_webhook(
 
 
 @app.get("/api/twilio/tts.mp3")
-async def twilio_tts_proxy(text: str):
-    if not text.strip():
+async def twilio_tts_proxy(text: str, sig: str = "") -> Response:
+    text = text.strip()
+    if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    if len(text) > 1000:
+    if len(text) > MAX_TTS_CHARS:
         raise HTTPException(status_code=400, detail="text is too long")
-
-    audio = await elevenlabs_client.generate_audio_briefing(text.strip())
+    # Only URLs generated by the voice webhook are honoured, so this cannot be
+    # used as an open text-to-speech proxy.
+    if not verify_text_signature(text, sig):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    audio = await elevenlabs_client.generate_audio_briefing(text)
     return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.post("/api/twilio/status")
 async def twilio_status_callback(
-    CallSid: Optional[str] = Form(None),
-    CallStatus: Optional[str] = Form(None),
-    To: Optional[str] = Form(None),
-    From: Optional[str] = Form(None),
-    CallDuration: Optional[str] = Form(None),
-):
-    return {
-        "ok": True,
-        "call_sid": CallSid,
-        "call_status": CallStatus,
-        "to": To,
-        "from": From,
-        "duration_seconds": CallDuration,
-    }
+    CallSid: str | None = Form(None),
+    CallStatus: str | None = Form(None),
+    CallDuration: str | None = Form(None),
+) -> dict[str, Any]:
+    logger.info("Twilio call %s status=%s duration=%s", CallSid, CallStatus, CallDuration)
+    return {"ok": True}
 
-# ── Custom LLM Endpoint for ElevenAgents ─────────────────────────
-class OpenAIMessage(BaseModel):
-    role: str
-    content: str
 
-class ChatCompletionRequest(BaseModel):
-    messages: list[OpenAIMessage]
-    model: str
-    temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = None
-    stream: Optional[bool] = False
-    elevenlabs_extra_body: Optional[dict] = None
+# ── OpenAI-compatible custom LLM endpoint for ElevenLabs agents ───
+@app.post("/v1/chat/completions", dependencies=[Depends(require_custom_llm_key)])
+async def custom_llm_completion(request: ChatCompletionRequest) -> StreamingResponse:
+    # ElevenLabs forwards dynamic variables in extra_body; the widget sets UUID=analysis_id.
+    analysis_id = (request.elevenlabs_extra_body or {}).get("UUID")
 
-@app.post("/v1/chat/completions")
-async def custom_llm_completion(request: ChatCompletionRequest):
-    # ElevenLabs passes custom variables in extra_body. We expect UUID (analysis_id)
-    extra = request.elevenlabs_extra_body or {}
-    analysis_id = extra.get("UUID")
-    
     system_prompt = "You are LEXGUARD, an AI contract intelligence system."
     if analysis_id:
-        data = analysis_store.get_analysis(analysis_id)
+        data = analysis_store.get_analysis(str(analysis_id))
         if data and data.get("status") == "complete":
-            lexscore = data.get("lexscore", 0)
             critical = json.dumps(data.get("summary", {}).get("critical_issues", []))
-            system_prompt += f" You have analyzed their document. LEXSCORE: {lexscore}. Critical issues: {critical}. Keep answers short."
-    
-    # We extract the last user message, or we can format the whole conversation for Gemini
-    conversation = "\n".join([f"{m.role}: {m.content}" for m in request.messages])
+            system_prompt += (
+                f" You have analyzed their document. LEXSCORE: {data.get('lexscore', 0)}."
+                f" Critical issues: {critical}. Keep answers short."
+            )
+
+    conversation = "\n".join(f"{m.role}: {m.content}" for m in request.messages[-20:])
     prompt = f"Conversation history:\n{conversation}\n\nRespond to the last message concisely."
-    
-    from services.gemini_client import generate_stream
-    stream = generate_stream(prompt, system=system_prompt, temperature=request.temperature or 0.5)
-    
-    async def event_stream():
-        chunk_id = f"chatcmpl-{int(time.time())}"
+
+    def chunk(content: str) -> dict[str, Any]:
+        return {
+            "id": chunk_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": request.model,
+            "choices": [{"delta": {"content": content}, "index": 0, "finish_reason": None}],
+        }
+
+    chunk_id = f"chatcmpl-{int(time.time())}"
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        # Initial filler keeps the voice agent's prosody natural while Gemini starts up.
+        yield _sse(chunk("Let me check that for you... "))
         try:
-            # Yield an initial buffer chunk for ElevenLabs to maintain prosody if there's a delay
-            initial_chunk = {
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": request.model,
-                "choices": [{"delta": {"content": "Let me check that for you... "}, "index": 0, "finish_reason": None}]
-            }
-            yield f"data: {json.dumps(initial_chunk)}\n\n"
-            
-            async for text_chunk in stream:
-                oai_chunk = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": request.model,
-                    "choices": [{"delta": {"content": text_chunk}, "index": 0, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(oai_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            async for text_chunk in gemini_client.generate_stream(
+                prompt, system=system_prompt, temperature=request.temperature or 0.5
+            ):
+                yield _sse(chunk(text_chunk))
+        except Exception:
+            logger.exception("Custom LLM stream failed")
+            yield _sse({"error": "upstream model error"})
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

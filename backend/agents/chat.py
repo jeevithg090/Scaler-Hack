@@ -2,7 +2,6 @@ import json
 
 from services.gemini_client import generate
 
-
 SYSTEM = """You are LEXGUARD's legal assistant. You have analyzed a legal document and have the full analysis in context.
 
 Answer the user's questions about this specific document.

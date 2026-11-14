@@ -10,7 +10,7 @@ Confidence = Literal["HIGH", "MEDIUM", "LOW"]
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     model: str
     agents: list[str]
     uptime_seconds: int = 0
