@@ -87,17 +87,12 @@ export function AgentThinking({
                 </span>
               )}
               {done && (
-                <span
-                  className="font-mono text-xs font-medium"
-                  style={{ color: agent.color }}
-                >
+                <span className="font-mono text-xs font-medium" style={{ color: agent.color }}>
                   ✓ done
                 </span>
               )}
               {!done && !running && (
-                <span className="font-mono text-[10px] text-slate-700">
-                  pending
-                </span>
+                <span className="font-mono text-[10px] text-slate-700">pending</span>
               )}
             </div>
           </div>

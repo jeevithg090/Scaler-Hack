@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ClauseAnalysis } from "@/lib/types";
 
-export function RedlineModal({
-  clause,
-  onClose,
-}: {
-  clause: ClauseAnalysis;
-  onClose: () => void;
-}) {
+export function RedlineModal({ clause, onClose }: { clause: ClauseAnalysis; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(clause.suggested_redline);
@@ -24,6 +26,9 @@ export function RedlineModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Suggested redline for ${clause.clause_id}`}
         className="w-full max-w-lg rounded-2xl border border-slate-700 bg-lex-bg p-6 shadow-2xl animate-fade-in-up"
         onClick={(e) => e.stopPropagation()}
       >
@@ -37,6 +42,8 @@ export function RedlineModal({
             </p>
           </div>
           <button
+            type="button"
+            aria-label="Close"
             onClick={onClose}
             className="rounded-lg border border-slate-700 p-2 text-xs text-slate-500 transition-colors hover:bg-slate-800"
           >
@@ -59,9 +66,7 @@ export function RedlineModal({
           <p className="mb-1.5 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-green">
             SUGGESTED REPLACEMENT
           </p>
-          <p className="text-sm leading-relaxed text-emerald-200">
-            {clause.suggested_redline}
-          </p>
+          <p className="text-sm leading-relaxed text-emerald-200">{clause.suggested_redline}</p>
         </div>
 
         <button

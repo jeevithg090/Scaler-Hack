@@ -24,9 +24,7 @@ export function NegotiationScript({ script }: { script: string }) {
           {copied ? "✓ Copied!" : "Copy"}
         </button>
       </div>
-      <p className="text-sm leading-relaxed text-indigo-200 italic">
-        &ldquo;{script}&rdquo;
-      </p>
+      <p className="text-sm leading-relaxed text-indigo-200 italic">&ldquo;{script}&rdquo;</p>
     </div>
   );
 }

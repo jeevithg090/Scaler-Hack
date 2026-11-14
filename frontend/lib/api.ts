@@ -1,11 +1,15 @@
 import type { StreamEvent } from "./types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
+  /\/+$/,
+  "",
+);
+const API = API_BASE;
 
 export async function startAnalysis(
   file?: File,
   text?: string,
-  url?: string
+  url?: string,
 ): Promise<{ analysis_id: string }> {
   const form = new FormData();
   if (file) form.append("file", file);
@@ -25,7 +29,8 @@ export async function startAnalysis(
 
 export function streamAnalysis(
   id: string,
-  onEvent: (event: StreamEvent) => void
+  onEvent: (event: StreamEvent) => void,
+  onDisconnect?: () => void,
 ): () => void {
   const es = new EventSource(`${API}/api/analyze/${id}/stream`);
 
@@ -41,7 +46,10 @@ export function streamAnalysis(
     }
   };
 
-  es.onerror = () => es.close();
+  es.onerror = () => {
+    es.close();
+    onDisconnect?.();
+  };
   return () => es.close();
 }
 
@@ -51,10 +59,7 @@ export async function getAnalysis(id: string) {
   return res.json();
 }
 
-export async function sendChatMessage(
-  analysisId: string,
-  message: string
-): Promise<string> {
+export async function sendChatMessage(analysisId: string, message: string): Promise<string> {
   const res = await fetch(`${API}/api/analyze/${analysisId}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -70,11 +75,9 @@ export async function sendChatMessage(
 
 export async function downloadNegotiationPack(
   analysisId: string,
-  format: "md" | "txt" = "md"
+  format: "md" | "txt" = "md",
 ): Promise<Blob> {
-  const res = await fetch(
-    `${API}/api/analyze/${analysisId}/negotiation-pack?format=${format}`
-  );
+  const res = await fetch(`${API}/api/analyze/${analysisId}/negotiation-pack?format=${format}`);
   if (!res.ok) {
     const err = await res.text().catch(() => "");
     throw new Error(err || "Failed to generate negotiation pack");

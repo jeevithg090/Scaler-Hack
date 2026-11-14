@@ -2,11 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Play, Square, Loader2 } from "lucide-react";
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
-  /\/$/,
-  ""
-);
+import { API_BASE } from "@/lib/api";
 
 function resolveEndpoint(endpoint: string) {
   if (/^https?:\/\//i.test(endpoint)) return endpoint;
@@ -28,6 +24,7 @@ export function AudioPlayer({
 }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
 
@@ -48,6 +45,7 @@ export function AudioPlayer({
 
     if (!audioRef.current) {
       setIsLoading(true);
+      setFailed(false);
       try {
         const res = await fetch(resolveEndpoint(endpoint), {
           method: "POST",
@@ -65,6 +63,7 @@ export function AudioPlayer({
         };
       } catch (err) {
         console.error("Failed to load audio", err);
+        setFailed(true);
         setIsLoading(false);
         return;
       }
@@ -85,8 +84,11 @@ export function AudioPlayer({
 
   return (
     <button
+      type="button"
       onClick={togglePlay}
       disabled={isLoading}
+      aria-busy={isLoading}
+      title={failed ? "Audio unavailable — check the backend voice configuration" : undefined}
       className={`inline-flex items-center gap-2 rounded-full font-medium transition-all ${
         isSmall
           ? "px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 text-white/70"
@@ -100,7 +102,7 @@ export function AudioPlayer({
       ) : (
         <Play className={`fill-current ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
       )}
-      {isPlaying ? "Stop" : buttonText}
+      {isPlaying ? "Stop" : failed ? "Audio unavailable" : buttonText}
     </button>
   );
 }
