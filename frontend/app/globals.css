@@ -3,19 +3,66 @@
 @tailwind utilities;
 
 /* ── Base ─────────────────────────────────────────── */
-body {
-  @apply bg-lex-bg text-slate-100 antialiased;
-  font-family:
-    var(--font-inter),
-    "Inter",
-    system-ui,
-    -apple-system,
-    sans-serif;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-lex-bg font-sans text-slate-100 antialiased;
+  }
+
+  /* Visible, consistent keyboard focus on every interactive element. */
+  :focus-visible {
+    outline: 2px solid #a5b4fc;
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.35);
+    color: #fff;
+  }
+
+  /* Anchor targets clear the fixed 64px header. */
+  [id] {
+    scroll-margin-top: 5rem;
+  }
 }
 
-code,
-.font-mono {
-  font-family: var(--font-mono), "JetBrains Mono", "Fira Code", monospace;
+/* ── Component primitives ─────────────────────────── */
+@layer components {
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-indigo-600 text-white shadow-lg shadow-lex-accent/20 hover:bg-indigo-500 disabled:shadow-none;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-700 bg-slate-900/40 text-slate-200 hover:border-lex-accent/60 hover:text-white;
+  }
+  .btn-sm {
+    @apply min-h-[40px] rounded-lg px-3 text-xs;
+  }
+  .card {
+    @apply rounded-2xl border border-lex-border bg-lex-card/80;
+  }
+  .field {
+    @apply w-full rounded-xl border border-slate-700 bg-lex-card/60 p-4 text-sm text-slate-100 transition-colors placeholder:text-slate-400 hover:border-slate-600 focus:border-lex-accent focus:outline-none focus:ring-2 focus:ring-lex-accent/30;
+  }
+  .field-invalid {
+    @apply border-lex-red/70 focus:border-lex-red focus:ring-lex-red/30;
+  }
+  .eyebrow {
+    @apply font-mono text-2xs font-bold uppercase tracking-[0.2em];
+  }
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-lex-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white;
+  }
 }
 
 /* ── Custom scrollbar ─────────────────────────────── */
@@ -208,13 +255,28 @@ code,
 
 /* ── Upload drop zone ─────────────────────────────── */
 .dropzone {
-  @apply rounded-2xl border-2 border-dashed border-slate-700 p-8 text-center transition-all duration-300;
+  @apply rounded-2xl border-2 border-dashed border-slate-600 p-8 text-center transition-all duration-300;
 }
 
 .dropzone:hover,
 .dropzone.active {
   @apply border-lex-accent bg-lex-accent/5;
   box-shadow: 0 0 40px rgba(99, 102, 241, 0.08);
+}
+
+/* ── Respect reduced-motion preferences ───────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .stagger-children > * {
+    opacity: 1 !important;
+  }
 }
 
 /* ── Stagger children animation ───────────────────── */

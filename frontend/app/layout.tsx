@@ -5,29 +5,49 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+const DESCRIPTION =
+  "Adversarial multi-agent contract analysis. Upload an offer letter, NDA, freelance agreement or terms of service and get a LEXSCORE, clause-by-clause verdicts and negotiation scripts.";
+
 export const viewport: Viewport = {
   themeColor: "#0a0f1a",
+  colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
 };
 
 export const metadata: Metadata = {
-  title: "LEXGUARD — AI Contract Intelligence",
-  description:
-    "Adversarial multi-agent AI that fights for you before you sign. Upload any contract, offer letter, NDA, or ToS and get a battle-tested risk assessment in under 60 seconds.",
-  keywords: ["contract analysis", "AI lawyer", "legal risk", "NDA review", "employment contract"],
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "LEXGUARD — AI Contract Intelligence",
+    template: "%s · LEXGUARD",
+  },
+  description: DESCRIPTION,
+  applicationName: "LEXGUARD",
+  keywords: ["contract analysis", "contract review", "legal risk", "NDA review", "offer letter"],
   openGraph: {
     title: "LEXGUARD — AI Contract Intelligence",
     description:
       "Six adversarial AI agents analyze your contract and give you the words to fight back.",
     type: "website",
+    siteName: "LEXGUARD",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LEXGUARD — AI Contract Intelligence",
+    description: DESCRIPTION,
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`dark ${inter.variable} ${mono.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
+        {children}
+      </body>
     </html>
   );
 }
