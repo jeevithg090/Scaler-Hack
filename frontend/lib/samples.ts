@@ -1,0 +1,17 @@
+/** Demo contract text (mirrors samples/demo-employment.txt) for the "Try a sample" button. */
+export const SAMPLE_EMPLOYMENT = `EMPLOYMENT AGREEMENT
+
+1. At-Will Employment. Employment is at-will and may be terminated by the Company for any reason without notice or cause.
+
+2. Compensation. The Company may modify compensation, benefits, or job duties at its sole discretion at any time.
+
+3. Intellectual Property. All inventions, works, and ideas created during employment or outside working hours that relate to the Company's business shall be the exclusive property of the Company.
+
+4. Non-Compete. Employee agrees not to work for any competitor for two (2) years following termination within a fifty (50) mile radius.
+
+5. Indemnification. Employee shall indemnify and hold harmless the Company from any claims arising from Employee's conduct.
+
+6. Arbitration. All disputes shall be resolved through binding arbitration in Delaware. Employee waives the right to a jury trial.
+
+7. Data Use. Company may collect, store, and share employee data with third-party partners for business purposes.
+`;
