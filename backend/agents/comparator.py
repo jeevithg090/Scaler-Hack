@@ -32,9 +32,7 @@ Return ONLY JSON:
 
 async def run(synthesis: dict, doc_meta: dict) -> dict:
     red_amber = [
-        c
-        for c in synthesis.get("clause_results", [])
-        if c.get("verdict") in ("RED", "AMBER")
+        c for c in synthesis.get("clause_results", []) if c.get("verdict") in ("RED", "AMBER")
     ]
     if not red_amber:
         return {

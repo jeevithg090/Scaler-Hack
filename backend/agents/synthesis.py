@@ -16,7 +16,9 @@ For each clause with any risk or defense, produce:
 - lexscore_impact: integer -15 to +2 per clause
 
 Also compute:
-- lexscore: 0-100 (start 100, apply impacts from context.md rules)
+- lexscore: 0-100 using these rules: start at 100; CRITICAL clause -15; HIGH -8; MEDIUM -4;
+  LOW -1; each missing protection -5; each INDEFENSIBLE defense an extra -3; each STRONG
+  defense +2; floor 0
 - lexscore_label: HOSTILE|PREDATORY|HIGH_RISK|MODERATE|FAIR|GOOD|EXCELLENT
 - missing_protections: string[]
 - critical_issues: top 3 plain-English warnings
