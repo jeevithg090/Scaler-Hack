@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: GEMINI_API_KEY=your_key ./test-gemini.sh
+# Usage: GEMINI_API_KEY=your_key ./scripts/test-gemini.sh
 set -euo pipefail
 
 API_KEY="${GEMINI_API_KEY:?Set GEMINI_API_KEY}"
@@ -12,8 +12,8 @@ run_test() {
   echo ""
   echo "=== $name ==="
   http_code=$(curl -s -o /tmp/gemini_resp.json -w "%{http_code}" \
-    "${BASE}?key=${API_KEY}" \
-    -H 'Content-Type: application/json' \
+    "${BASE}" \
+    -H "x-goog-api-key: ${API_KEY}" -H 'Content-Type: application/json' \
     -d "$payload")
   echo "HTTP $http_code"
   cat /tmp/gemini_resp.json | python3 -m json.tool 2>/dev/null || cat /tmp/gemini_resp.json

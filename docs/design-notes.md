@@ -1,3 +1,5 @@
+> **Note:** This is the original hackathon planning document, kept for reference. Some details (e.g. the LLM provider, which is Gemini in the shipped code) differ from the implementation. See the main [README](../README.md) for the current architecture.
+
 # LEXGUARD — AI Rights & Contract Intelligence System
 ## Project Context, Architecture & Build Blueprint
 > H2S Build with AI Hackathon | Google for Developers | 5-Hour Sprint
