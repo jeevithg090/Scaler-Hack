@@ -62,7 +62,7 @@ export function AudioPlayer({
           setIsPlaying(false);
         };
       } catch (err) {
-        console.error("Failed to load audio", err);
+        console.warn("Failed to load audio", err);
         setFailed(true);
         setIsLoading(false);
         return;
@@ -75,7 +75,7 @@ export function AudioPlayer({
         await audioRef.current.play();
         setIsPlaying(true);
       } catch (err) {
-        console.error("Failed to play audio", err);
+        console.warn("Failed to play audio", err);
       }
     }
   };
@@ -89,20 +89,23 @@ export function AudioPlayer({
       disabled={isLoading}
       aria-busy={isLoading}
       title={failed ? "Audio unavailable — check the backend voice configuration" : undefined}
-      className={`inline-flex items-center gap-2 rounded-full font-medium transition-all ${
-        isSmall
-          ? "px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 text-white/70"
-          : "px-4 py-2 text-sm bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
-      } ${className}`}
+      aria-label={failed ? `${buttonText}: audio unavailable` : undefined}
+      className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border font-medium transition-colors disabled:cursor-wait ${
+        failed
+          ? "border-slate-700 text-slate-400"
+          : isSmall
+            ? "border-slate-700 bg-white/5 text-slate-200 hover:border-lex-accent/60 hover:bg-white/10"
+            : "border-indigo-400/30 bg-lex-accent/10 text-indigo-200 hover:bg-lex-accent/20"
+      } ${isSmall ? "px-3 text-xs" : "px-4 text-sm"} ${className}`}
     >
       {isLoading ? (
-        <Loader2 className={`animate-spin ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
+        <Loader2 aria-hidden="true" className={`animate-spin ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
       ) : isPlaying ? (
-        <Square className={`fill-current ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
+        <Square aria-hidden="true" className={`fill-current ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
       ) : (
-        <Play className={`fill-current ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
+        <Play aria-hidden="true" className={`fill-current ${isSmall ? "w-3 h-3" : "w-4 h-4"}`} />
       )}
-      {isPlaying ? "Stop" : failed ? "Audio unavailable" : buttonText}
+      {isLoading ? "Generating…" : isPlaying ? "Stop" : failed ? "Audio unavailable" : buttonText}
     </button>
   );
 }

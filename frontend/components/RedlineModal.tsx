@@ -34,7 +34,7 @@ export function RedlineModal({ clause, onClose }: { clause: ClauseAnalysis; onCl
       >
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <p className="font-mono text-[10px] font-bold tracking-[1.5px] text-lex-green">
+            <p className="font-mono text-2xs font-bold tracking-[1.5px] text-green-300">
               SUGGESTED REDLINE
             </p>
             <p className="mt-1 text-sm text-slate-400">
@@ -45,7 +45,7 @@ export function RedlineModal({ clause, onClose }: { clause: ClauseAnalysis; onCl
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="rounded-lg border border-slate-700 p-2 text-xs text-slate-500 transition-colors hover:bg-slate-800"
+            className="rounded-lg border border-slate-700 p-2 text-xs text-slate-400 transition-colors hover:bg-slate-800"
           >
             ✕
           </button>
@@ -53,7 +53,7 @@ export function RedlineModal({ clause, onClose }: { clause: ClauseAnalysis; onCl
 
         {/* Original */}
         <div className="mb-4 rounded-lg bg-red-950/15 border border-lex-red/10 p-4">
-          <p className="mb-1.5 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-red">
+          <p className="mb-1.5 font-mono text-2xs font-bold tracking-[1.5px] text-red-300">
             ORIGINAL
           </p>
           <p className="text-xs leading-relaxed text-slate-400 italic line-through decoration-lex-red/30">
@@ -63,7 +63,7 @@ export function RedlineModal({ clause, onClose }: { clause: ClauseAnalysis; onCl
 
         {/* Redline */}
         <div className="mb-4 rounded-lg bg-emerald-950/15 border border-lex-green/10 p-4">
-          <p className="mb-1.5 font-mono text-[9px] font-bold tracking-[1.5px] text-lex-green">
+          <p className="mb-1.5 font-mono text-2xs font-bold tracking-[1.5px] text-green-300">
             SUGGESTED REPLACEMENT
           </p>
           <p className="text-sm leading-relaxed text-emerald-200">{clause.suggested_redline}</p>

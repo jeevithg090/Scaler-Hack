@@ -59,6 +59,18 @@ export async function getAnalysis(id: string) {
   return res.json();
 }
 
+export interface HealthInfo {
+  status: string;
+  environment?: { elevenlabs?: boolean; gemini_api_key?: boolean };
+}
+
+/** Backend health and feature flags, used to hide features that are not configured. */
+export async function getHealth(): Promise<HealthInfo> {
+  const res = await fetch(`${API}/api/health`);
+  if (!res.ok) throw new Error("Health check failed");
+  return res.json();
+}
+
 export async function sendChatMessage(analysisId: string, message: string): Promise<string> {
   const res = await fetch(`${API}/api/analyze/${analysisId}/chat`, {
     method: "POST",
